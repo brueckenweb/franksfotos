@@ -32,9 +32,11 @@ jobs:
             pwd
 
       - name: Erstelle .env.production aus Secret (für Build)
+        env:
+          FRANKSFOTOS_ENV: ${{ secrets.FRANKSFOTOS_ENV }}
         run: |
           echo "=== Erstelle .env.production aus Secret ==="
-          echo "${{ secrets.FRANKSFOTOS_ENV }}" > .env.production
+          printf '%s\n' "$FRANKSFOTOS_ENV" > .env.production
           echo "Anzahl Zeilen: $(wc -l < .env.production)"
           echo "✓ .env.production erstellt"
 
@@ -108,9 +110,11 @@ jobs:
             ls -la /www/frank-sellke/
 
       - name: Erstelle .env.production aus Secret
+        env:
+          FRANKSFOTOS_ENV: ${{ secrets.FRANKSFOTOS_ENV }}
         run: |
           echo "=== Erstelle .env.production aus Secret ==="
-          echo "${{ secrets.FRANKSFOTOS_ENV }}" > .env.production
+          printf '%s\n' "$FRANKSFOTOS_ENV" > .env.production
           echo "Anzahl Zeilen: $(wc -l < .env.production)"
           echo "✓ .env.production erstellt"
 
