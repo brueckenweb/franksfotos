@@ -31,9 +31,16 @@ jobs:
             whoami
             pwd
 
+      - name: Erstelle .env.production aus Secret (für Build)
+        run: |
+          echo "=== Erstelle .env.production aus Secret ==="
+          echo "${{ secrets.FRANKSFOTOS_ENV }}" > .env.production
+          echo "Anzahl Zeilen: $(wc -l < .env.production)"
+          echo "✓ .env.production erstellt"
+
       - name: Install dependencies
         run: npm install --legacy-peer-deps
-
+            
       - name: Build
         run: npm run build
 
