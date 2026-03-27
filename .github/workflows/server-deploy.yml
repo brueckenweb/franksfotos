@@ -105,7 +105,7 @@ jobs:
 
             # Lösche alte Deployment-Dateien (behalte subdomain_pics, .git, log)
             cd /home/users/franksellke/www/frank-sellke
-            rm -rf .next package.json public ecosystem.config.cjs .env.production 2>/dev/null || true
+            rm -rf .next package.json public ecosystem.config.cjs .env.production .htaccess 2>/dev/null || true
 
             echo "Verzeichnis bereit:"
             ls -la /home/users/franksellke/www/frank-sellke/
@@ -129,7 +129,7 @@ jobs:
           ls -la public/
 
           echo "Füge .env.production zum Archiv hinzu..."
-          tar -czf deployment.tar.gz .next package.json public ecosystem.config.cjs .env.production
+          tar -czf deployment.tar.gz .next package.json public ecosystem.config.cjs .env.production .htaccess
           ls -la deployment.tar.gz
           echo "Archiv-Größe: $(du -h deployment.tar.gz | cut -f1)"
 

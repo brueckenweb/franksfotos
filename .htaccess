@@ -1,0 +1,13 @@
+# Reverse Proxy für Next.js (Port 3001)
+# Diese Datei wird automatisch per GitHub Actions deployt
+
+Options -MultiViews
+RewriteEngine On
+
+# WebSocket-Verbindungen proxyen
+RewriteCond %{HTTP:Upgrade} websocket [NC]
+RewriteCond %{HTTP:Connection} upgrade [NC]
+RewriteRule ^/?(.*) ws://127.0.0.1:3001/$1 [P,L]
+
+# Alle anderen Anfragen zu Next.js proxyen
+RewriteRule ^(.*)$ http://127.0.0.1:3001/$1 [P,L]
