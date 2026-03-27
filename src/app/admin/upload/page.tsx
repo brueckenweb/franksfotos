@@ -172,6 +172,10 @@ export default function AdminUploadPage() {
           prev.map((f) => (f.id === uploadFile.id ? { ...f, progress: 95 } : f))
         );
 
+        // bnummer aus originalem Dateinamen extrahieren (z.B. B123456.jpg → 123456)
+        const bnummerMatch = uploadFile.file.name.match(/^B(\d+)\.[^.]+$/i);
+        const bnummer = bnummerMatch ? parseInt(bnummerMatch[1], 10) : null;
+
         const dbPayload = {
           filename: uploadData.fileName,
           fileUrl: uploadData.fileUrl,
@@ -181,6 +185,7 @@ export default function AdminUploadPage() {
           title: uploadFile.file.name.replace(/\.[^/.]+$/, ""),
           description: description.trim() || null,
           exifData: exifData ?? null,
+          bnummer,
         };
 
         const dbRes = await fetch(`/api/${isVideo ? "videos" : "photos"}`, {
@@ -326,7 +331,14 @@ export default function AdminUploadPage() {
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm text-gray-300 truncate">{f.file.name}</p>
+                    <div className="flex items-center gap-2">
+                      <p className="text-sm text-gray-300 truncate">{f.file.name}</p>
+                      {/^B(\d+)\.[^.]+$/i.test(f.file.name) && (
+                        <span className="flex-shrink-0 text-xs bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded px-1.5 py-0.5 font-mono">
+                          B{f.file.name.match(/^B(\d+)/i)![1]}
+                        </span>
+                      )}
+                    </div>
                     <p className="text-xs text-gray-600">
                       {(f.file.size / (1024 * 1024)).toFixed(1)} MB
                     </p>

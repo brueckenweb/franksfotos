@@ -9,10 +9,12 @@ Diese Anleitung erklärt, wie das Franksfotos-Projekt über GitHub Actions autom
 | Eigenschaft | Wert |
 |---|---|
 | **Server** | `87.118.90.98` |
-| **Zielverzeichnis** | `/www/frank-sellke` |
+| **Zielverzeichnis** | `/home/users/franksellke/www/frank-sellke` |
 | **Port** | `3001` |
 | **PM2 App-Name** | `franksfotos-prod` |
 | **Trigger** | Push auf Branch `main` |
+| **URL** | `https://frank-sellke.de` / `https://www.frank-sellke.de` |
+| **Reverse Proxy** | Apache via `.htaccess` (mod_rewrite `[P]`) |
 
 ---
 
@@ -123,18 +125,18 @@ NEXT_PUBLIC_MEDIA_BASE_URL=https://pics.frank-sellke.de
 Beim **ersten** Deployment muss das Repository auf dem Server geklont werden:
 
 ```bash
-# SSH-Verbindung zum Server
+# SSH-Verbindung zum Server (über Zwischen-User falls nötig)
 ssh franksellke@87.118.90.98
 
 # Verzeichnis erstellen (falls nicht vorhanden)
-mkdir -p /www/frank-sellke
-cd /www
+mkdir -p /home/users/franksellke/www/frank-sellke
 
 # Repository klonen
+cd /home/users/franksellke/www
 git clone https://github.com/brueckenweb/franksfotos.git frank-sellke
 
 # Log-Verzeichnis für PM2 anlegen
-mkdir -p /www/frank-sellke/log/pm2
+mkdir -p /home/users/franksellke/www/frank-sellke/log/pm2
 ```
 
 Falls der Server privaten Zugriff auf GitHub benötigt, muss ein **Deploy Key** eingerichtet werden:
@@ -167,7 +169,7 @@ Den Fortschritt kannst du unter `GitHub Repo → Actions` verfolgen.
 1. 🔑 SSH-Verbindung testen
 2. 📦 Dependencies installieren (GitHub Actions Runner)
 3. 🔨 `npm run build` ausführen
-4. 📁 Zielverzeichnis `/www/frank-sellke` prüfen/anlegen
+4. 📁 Zielverzeichnis `/home/users/franksellke/www/frank-sellke` prüfen/anlegen
 5. 🔄 Neue Dateien aus `public/` vom Server ins Repo synchronisieren
 6. 🗑️ Alte Deployment-Dateien auf dem Server löschen
 7. 📝 `.env.production` aus GitHub Secret erstellen
@@ -190,11 +192,11 @@ pm2 logs franksfotos-prod --lines 50
 
 ### App manuell neu starten
 ```bash
-cd /www/frank-sellke
+cd /home/users/franksellke/www/frank-sellke
 pm2 restart franksfotos-prod
 ```
 
 ### Logs anzeigen
 ```bash
-tail -f /www/frank-sellke/log/pm2/franksfotos-combined.log
+tail -f /home/users/franksellke/www/frank-sellke/log/pm2/franksfotos-combined.log
 ```
