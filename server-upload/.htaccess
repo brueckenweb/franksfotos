@@ -1,0 +1,43 @@
+# FranksFotos – pics.frank-sellke.de Webroot
+# Diese .htaccess in den Webroot von pics.frank-sellke.de hochladen
+
+# ==============================================================
+# SICHERHEIT: Direkten Zugriff auf PHP-Dateien einschränken
+# ==============================================================
+
+# Nur upload.php ist von außen erreichbar
+# Alle anderen PHP-Dateien werden geblockt
+<FilesMatch "\.php$">
+    Order Deny,Allow
+    Deny from all
+</FilesMatch>
+
+<Files "upload.php">
+    Order Allow,Deny
+    Allow from all
+</Files>
+
+# ==============================================================
+# MEDIENDATEIEN: Caching für Bilder/Videos
+# ==============================================================
+<IfModule mod_expires.c>
+    ExpiresActive On
+    ExpiresByType image/jpeg  "access plus 1 year"
+    ExpiresByType image/png   "access plus 1 year"
+    ExpiresByType image/webp  "access plus 1 year"
+    ExpiresByType video/mp4   "access plus 1 year"
+</IfModule>
+
+# ==============================================================
+# CORS: Bilder/Videos dürfen von frank-sellke.de geladen werden
+# ==============================================================
+<IfModule mod_headers.c>
+    <FilesMatch "\.(jpg|jpeg|png|webp|gif|mp4|mov|webm)$">
+        Header set Access-Control-Allow-Origin "https://www.frank-sellke.de"
+    </FilesMatch>
+</IfModule>
+
+# ==============================================================
+# DIRECTORY LISTING deaktivieren
+# ==============================================================
+Options -Indexes
