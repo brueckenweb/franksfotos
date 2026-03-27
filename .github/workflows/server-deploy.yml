@@ -121,8 +121,11 @@ jobs:
       - name: Erstelle tar-Archiv für SSH-Upload
         run: |
           echo "=== Erstelle tar-Archiv für SSH-Upload ==="
-          echo "Prüfe public-Verzeichnis vor Archivierung:"
-          ls -la public/ || echo "public-Verzeichnis nicht gefunden"
+          
+          # Stelle sicher dass public-Verzeichnis existiert (auch wenn leer)
+          mkdir -p public
+          echo "Inhalt public-Verzeichnis:"
+          ls -la public/ || echo "public-Verzeichnis leer"
 
           echo "Füge .env.production zum Archiv hinzu..."
           tar -czf deployment.tar.gz .next package.json public ecosystem.config.cjs .env.production
