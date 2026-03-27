@@ -5,6 +5,9 @@ on:
     branches:
       - main
 
+env:
+  DEPLOY_PATH: /home/users/franksellke/www/frank-sellke
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -53,19 +56,19 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            echo "=== Prüfe Zielverzeichnis /www/frank-sellke ==="
+            echo "=== Prüfe Zielverzeichnis /home/users/franksellke/www/frank-sellke ==="
             echo "Aktueller Benutzer: $(whoami)"
 
             # Erstelle Verzeichnis falls nicht vorhanden
-            mkdir -p /www/frank-sellke
-            mkdir -p /www/frank-sellke/log/pm2
+            mkdir -p /home/users/franksellke/www/frank-sellke
+            mkdir -p /home/users/franksellke/www/frank-sellke/log/pm2
 
-            # Teste Schreibrechte in /www/frank-sellke
-            if touch /www/frank-sellke/test-write 2>/dev/null; then
-                rm /www/frank-sellke/test-write
-                echo "✓ Schreibrechte in /www/frank-sellke: OK"
+            # Teste Schreibrechte
+            if touch /home/users/franksellke/www/frank-sellke/test-write 2>/dev/null; then
+                rm /home/users/franksellke/www/frank-sellke/test-write
+                echo "✓ Schreibrechte in /home/users/franksellke/www/frank-sellke: OK"
             else
-                echo "✗ Schreibrechte in /www/frank-sellke: FEHLER"
+                echo "✗ Schreibrechte FEHLER"
                 exit 1
             fi
 
@@ -76,8 +79,8 @@ jobs:
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            echo "=== Synchronisiere neue Dateien aus /www/frank-sellke/public ins Repository ==="
-            cd /www/frank-sellke
+            echo "=== Synchronisiere neue Dateien aus public ins Repository ==="
+            cd /home/users/franksellke/www/frank-sellke
             git config --global user.email "github-actions@github.com"
             git config --global user.name "GitHub Actions"
             git pull origin main
@@ -90,24 +93,22 @@ jobs:
               echo "Keine neuen oder geänderten Dateien in public gefunden."
             fi
 
-      - name: Bereite /www/frank-sellke vor
+      - name: Bereite Zielverzeichnis vor
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.SERVER_HOST }}
           username: ${{ secrets.SERVER_USER }}
           key: ${{ secrets.SERVER_SSH_KEY }}
           script: |
-            echo "=== Bereite /www/frank-sellke vor ==="
+            echo "=== Bereite /home/users/franksellke/www/frank-sellke vor ==="
+            ls -la /home/users/franksellke/www/frank-sellke/
 
-            # Prüfe aktuelle Berechtigungen
-            ls -la /www/frank-sellke/
+            # Lösche alte Deployment-Dateien (behalte subdomain_pics, .git, log)
+            cd /home/users/franksellke/www/frank-sellke
+            rm -rf .next package.json public ecosystem.config.cjs .env.production 2>/dev/null || true
 
-            # Lösche alte Dateien (aber behalte Verzeichnisstruktur)
-            cd /www/frank-sellke
-            rm -rf .next package.json public ecosystem.config.cjs 2>/dev/null || true
-
-            echo "Verzeichnis bereit für neues Deployment:"
-            ls -la /www/frank-sellke/
+            echo "Verzeichnis bereit:"
+            ls -la /home/users/franksellke/www/frank-sellke/
 
       - name: Erstelle .env.production aus Secret
         env:
@@ -122,37 +123,15 @@ jobs:
         run: |
           echo "=== Erstelle tar-Archiv für SSH-Upload ==="
           
-          # Stelle sicher dass public-Verzeichnis existiert (auch wenn leer)
+          # Stelle sicher dass public-Verzeichnis existiert
           mkdir -p public
           echo "Inhalt public-Verzeichnis:"
-          ls -la public/ || echo "public-Verzeichnis leer"
+          ls -la public/
 
           echo "Füge .env.production zum Archiv hinzu..."
           tar -czf deployment.tar.gz .next package.json public ecosystem.config.cjs .env.production
           ls -la deployment.tar.gz
           echo "Archiv-Größe: $(du -h deployment.tar.gz | cut -f1)"
-
-      - name: Upload über SSH mit base64 (kein SCP nötig)
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          script: |
-            echo "=== Bereite Upload-Verzeichnis vor ==="
-            cd /www/frank-sellke
-
-            # Backup alte Dateien
-            if [ -d ".next" ]; then
-                echo "Erstelle Backup der alten Dateien..."
-                tar -czf backup-$(date +%Y%m%d-%H%M%S).tar.gz .next package.json public 2>/dev/null || true
-            fi
-
-            # Lösche alte Dateien
-            rm -rf .next package.json public ecosystem.config.cjs 2>/dev/null || true
-
-            echo "Bereit für neues Deployment..."
-            ls -la
 
       - name: Übertrage Dateien über SSH (base64)
         run: |
@@ -165,15 +144,15 @@ jobs:
           # Konvertiere zu base64 und übertrage
           base64 deployment.tar.gz | ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
             echo "=== Empfange base64-Daten ==="
-            base64 -d > /www/frank-sellke/deployment.tar.gz
+            base64 -d > /home/users/franksellke/www/frank-sellke/deployment.tar.gz
 
             echo "=== Entpacke Archiv ==="
-            cd /www/frank-sellke
+            cd /home/users/franksellke/www/frank-sellke
             tar -xzf deployment.tar.gz
             rm deployment.tar.gz
 
             echo "=== Deployment erfolgreich ==="
-            ls -la /www/frank-sellke/
+            ls -la /home/users/franksellke/www/frank-sellke/
 
             echo "=== Prüfe wichtige Dateien ==="
             [ -f "package.json" ] && echo "✓ package.json vorhanden" || echo "✗ package.json fehlt"
@@ -195,9 +174,8 @@ jobs:
           command_timeout: 120s
           script: |
             echo "=== Installiere Dependencies ==="
-            cd /www/frank-sellke
+            cd /home/users/franksellke/www/frank-sellke
 
-            # Prüfe ob package.json existiert
             if [ -f "package.json" ]; then
                 echo "package.json gefunden, installiere Dependencies..."
                 npm install --legacy-peer-deps
@@ -218,18 +196,11 @@ jobs:
           command_timeout: 60s
           script: |
             echo "=== Stoppe PM2 Application 'franksfotos-prod' ==="
-            cd /www/frank-sellke
 
-            # Prüfe PM2 Status
             pm2 list || echo "PM2 noch nicht initialisiert"
-
-            # Stoppe die Anwendung (falls sie läuft)
             pm2 stop franksfotos-prod 2>/dev/null || echo "franksfotos-prod war nicht aktiv"
-
-            # Lösche die Anwendung aus PM2 (für sauberen Neustart)
             pm2 delete franksfotos-prod 2>/dev/null || echo "franksfotos-prod war nicht registriert"
 
-            # Zeige finalen PM2 Status
             pm2 list
             echo "✅ PM2 Application gestoppt und bereinigt"
 
@@ -243,59 +214,43 @@ jobs:
           command_timeout: 120s
           script: |
             echo "=== Starte PM2 Application 'franksfotos-prod' ==="
-            cd /www/frank-sellke
+            cd /home/users/franksellke/www/frank-sellke
 
-            # Prüfe ob ecosystem.config.cjs existiert
-            if [ -f "ecosystem.config.cjs" ]; then
-                echo "✓ ecosystem.config.cjs gefunden"
-                cat ecosystem.config.cjs
-            else
+            if [ ! -f "ecosystem.config.cjs" ]; then
                 echo "❌ FEHLER: ecosystem.config.cjs nicht gefunden!"
                 ls -la
                 exit 1
             fi
 
-            # Prüfe ob .next Verzeichnis existiert
-            if [ -d ".next" ]; then
-                echo "✓ .next Verzeichnis gefunden"
-            else
+            if [ ! -d ".next" ]; then
                 echo "❌ FEHLER: .next Verzeichnis nicht gefunden!"
                 ls -la
                 exit 1
             fi
 
-            # Setze NODE_ENV für Produktion
             export NODE_ENV=production
 
-            # Starte die Anwendung mit PM2
             echo "Starte franksfotos-prod mit PM2..."
             pm2 start ecosystem.config.cjs
 
-            # Warte kurz für Startup
             sleep 10
 
-            # Prüfe PM2 Status
             echo "=== PM2 Status ==="
             pm2 list
-            pm2 show franksfotos-prod
 
-            # Prüfe ob die Anwendung läuft
             if pm2 list | grep -q "franksfotos-prod.*online"; then
                 echo "✅ franksfotos-prod läuft erfolgreich!"
 
-                # Zeige Log-Einträge
                 echo "=== Aktuelle Logs ==="
                 pm2 logs franksfotos-prod --lines 10 --nostream || echo "Logs noch nicht verfügbar"
 
-                # Port Status prüfen
                 echo "=== Port Status ==="
-                if netstat -tlnp | grep -q ":3001 "; then
+                if ss -tlnp | grep -q ":3001 "; then
                     echo "✅ Port 3001 ist aktiv"
                 else
                     echo "⚠️ Port 3001 noch nicht aktiv (kann bei Startup normal sein)"
                 fi
 
-                # Speichere PM2 Konfiguration
                 pm2 save
                 echo "✅ PM2 Konfiguration gespeichert"
 
