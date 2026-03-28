@@ -20,11 +20,14 @@ export default async function AdminLayout({
 
   return (
     <div className="min-h-screen bg-gray-950 flex">
-      {/* Seitenleiste */}
+      {/* Seitenleiste (Desktop: fest, Mobile: Drawer) */}
       <AdminNav session={session} />
 
-      {/* Hauptinhalt */}
-      <main className="flex-1 ml-64 p-6">
+      {/* Hauptinhalt:
+          - lg:ml-64 → auf Desktop Platz für die feste Sidebar
+          - pt-14 lg:pt-0 → auf Mobile Platz für die fixierte Topbar (h-14)
+          - p-4 lg:p-6 → kompakteres Padding auf Mobile */}
+      <main className="flex-1 lg:ml-64 p-4 lg:p-6 pt-[4.5rem] lg:pt-6 min-w-0">
         {children}
       </main>
     </div>

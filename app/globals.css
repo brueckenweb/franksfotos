@@ -1,0 +1,61 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --background: #ffffff;
+  --foreground: #171717;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #0a0a0a;
+    --foreground: #ededed;
+  }
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: Arial, Helvetica, sans-serif;
+  /* Verhindert horizontales Scrollen auf Mobile */
+  overflow-x: hidden;
+}
+
+/* Verhindert iOS Safari-Zoom bei Eingabefeldern (font-size >= 16px) */
+input[type="text"],
+input[type="email"],
+input[type="password"],
+input[type="search"],
+input[type="number"],
+select,
+textarea {
+  font-size: 16px;
+}
+
+/* Scrollbalken-Styling (Webkit) */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #374151;
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #4b5563;
+}
+
+/* Bilder auf Mobile: keine Überbreite */
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Tap-Highlight auf Mobile entfernen (setzt eigenes Hover-Design voraus) */
+* {
+  -webkit-tap-highlight-color: transparent;
+}

@@ -37,7 +37,7 @@ export default async function RootLayout({
   const session = await auth();
 
   return (
-    <html lang="de">
+    <html lang="de" data-scroll-behavior="smooth">
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen flex flex-col`}>
         <SessionProvider session={session}>
           <Header />
