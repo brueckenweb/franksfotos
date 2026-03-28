@@ -1,8 +1,9 @@
 module.exports = {
   apps: [{
     name: 'franksfotos-prod',
-    script: 'npm',
-    args: 'start',
+    // Direkt next aufrufen mit explizitem Port (nicht über npm start, um ENV-Vererbungsprobleme zu vermeiden)
+    script: 'node_modules/.bin/next',
+    args: 'start -p 3001',
     cwd: '/home/users/franksellke/www/frank-sellke',
     instances: 1,
     exec_mode: 'fork',

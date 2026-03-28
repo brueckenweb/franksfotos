@@ -11,6 +11,8 @@ import { users, userGroups, groups, userPermissions, groupPermissions, permissio
 import { eq, inArray } from "drizzle-orm";
 
 export const authConfig: NextAuthConfig = {
+  // Pflicht bei Betrieb hinter einem Reverse-Proxy (Apache, Nginx, etc.)
+  trustHost: true,
   pages: {
     signIn: "/login",
     error: "/login",

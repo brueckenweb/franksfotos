@@ -1,12 +1,14 @@
 /**
  * FranksFotos – Edge-kompatible NextAuth-Konfiguration
  * WICHTIG: Diese Datei darf KEINE Node.js-Module importieren (kein mysql2, bcryptjs etc.)
- * Sie wird im Edge Runtime (proxy.ts / Middleware) verwendet.
+ * Sie wird im Edge Runtime (middleware.ts) verwendet.
  */
 
 import type { NextAuthConfig } from "next-auth";
 
 export const edgeAuthConfig: NextAuthConfig = {
+  // Pflicht bei Betrieb hinter einem Reverse-Proxy (Apache, Nginx, etc.)
+  trustHost: true,
   pages: {
     signIn: "/login",
     error: "/login",
