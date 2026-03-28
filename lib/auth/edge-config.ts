@@ -9,6 +9,11 @@ import type { NextAuthConfig } from "next-auth";
 export const edgeAuthConfig: NextAuthConfig = {
   // Pflicht bei Betrieb hinter einem Reverse-Proxy (Apache, Nginx, etc.)
   trustHost: true,
+  // JWT-Strategie explizit erzwingen – verhindert "adapterFn is not a function"
+  // im Edge Runtime (proxy.ts), da kein Datenbank-Adapter im Edge verfügbar ist.
+  session: {
+    strategy: "jwt",
+  },
   pages: {
     signIn: "/login",
     error: "/login",

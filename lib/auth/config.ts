@@ -13,6 +13,10 @@ import { eq, inArray } from "drizzle-orm";
 export const authConfig: NextAuthConfig = {
   // Pflicht bei Betrieb hinter einem Reverse-Proxy (Apache, Nginx, etc.)
   trustHost: true,
+  // JWT-Strategie explizit erzwingen (Credentials-Provider ohne Datenbank-Adapter)
+  session: {
+    strategy: "jwt",
+  },
   pages: {
     signIn: "/login",
     error: "/login",
