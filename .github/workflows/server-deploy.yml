@@ -189,17 +189,45 @@ jobs:
         run: |
           ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
             sleep 5
-            echo "=== Teste http://localhost:3001/ ==="
-            HTTP_STATUS=$(curl -s -o /tmp/curl_output.txt -w "%{http_code}" http://localhost:3001/ 2>/dev/null || echo "FEHLER")
-            echo "HTTP Status: $HTTP_STATUS"
-            if [ "$HTTP_STATUS" = "200" ]; then
-              echo "✅ Root-Route antwortet mit 200 OK!"
-            elif [ "$HTTP_STATUS" = "FEHLER" ]; then
-              echo "❌ curl konnte localhost:3001 nicht erreichen – Next.js läuft nicht!"
+            echo ""
+            echo "=== TEST 1: Direkter Aufruf localhost:3001/ ==="
+            HTTP_STATUS=$(curl -s -o /tmp/curl_out1.txt -w "%{http_code}" http://localhost:3001/ 2>/dev/null || echo "FEHLER")
+            echo "HTTP Status (direkt): $HTTP_STATUS"
+
+            echo ""
+            echo "=== TEST 2: Mit Apache-Headern (Host: frank-sellke.de) ==="
+            HTTP_STATUS2=$(curl -s -o /tmp/curl_out2.txt -w "%{http_code}" \
+              -H "Host: frank-sellke.de" \
+              -H "X-Forwarded-Proto: https" \
+              -H "X-Forwarded-Port: 443" \
+              http://localhost:3001/ 2>/dev/null || echo "FEHLER")
+            echo "HTTP Status (mit Apache-Headers): $HTTP_STATUS2"
+
+            echo ""
+            echo "=== TEST 3: Mit Apache-Headern (Host: www.frank-sellke.de) ==="
+            HTTP_STATUS3=$(curl -s -o /tmp/curl_out3.txt -w "%{http_code}" \
+              -H "Host: www.frank-sellke.de" \
+              -H "X-Forwarded-Proto: https" \
+              -H "X-Forwarded-Port: 443" \
+              http://localhost:3001/ 2>/dev/null || echo "FEHLER")
+            echo "HTTP Status (mit www-Header): $HTTP_STATUS3"
+
+            echo ""
+            echo "=== Vergleich der Responses ==="
+            if [ "$HTTP_STATUS" = "200" ] && [ "$HTTP_STATUS2" != "200" ]; then
+              echo "⚠ PROBLEM GEFUNDEN: Direkt=200 aber mit Apache-Headers=$HTTP_STATUS2"
+              echo "→ Next.js verhält sich anders mit Apache-Proxy-Headers!"
+              echo "Response-Anfang mit Apache-Headers:"
+              head -3 /tmp/curl_out2.txt
+            elif [ "$HTTP_STATUS" = "200" ] && [ "$HTTP_STATUS2" = "200" ]; then
+              echo "✅ Beide Tests geben 200 zurück – Problem liegt in Apache-Konfiguration!"
             else
-              echo "⚠ HTTP Status: $HTTP_STATUS"
-              head -5 /tmp/curl_output.txt
+              echo "❌ Direkt-Test gibt $HTTP_STATUS zurück"
             fi
+
+            echo ""
+            echo "=== PM2 Logs (neueste Fehler) ==="
+            pm2 logs franksfotos-prod --lines 20 --nostream --err 2>/dev/null || true
           '
 
       - name: Aufräumen
