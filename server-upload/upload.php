@@ -194,6 +194,9 @@ if ($isRawUpload) {
         jsonError('Datei konnte nicht gespeichert werden', 500);
     }
 
+    // Datei-Rechte setzen: 644 = rw-r--r-- (Apache kann lesen, kein Exec)
+    @chmod($destFile, 0644);
+
     $fileSize = $bytesWritten;
 
 } else {
@@ -262,6 +265,9 @@ if ($isRawUpload) {
     if (!move_uploaded_file($file['tmp_name'], $destFile)) {
         jsonError('Datei konnte nicht gespeichert werden', 500);
     }
+
+    // Datei-Rechte setzen: 644 = rw-r--r-- (Apache kann lesen, kein Exec)
+    @chmod($destFile, 0644);
 
     $fileSize = $file['size'];
 }

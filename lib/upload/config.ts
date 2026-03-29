@@ -160,7 +160,8 @@ export class UploadConfigHelper {
   static generateUniqueFilename(originalName: string): string {
     const timestamp = Date.now();
     const randomSuffix = Math.random().toString(36).substring(2, 8);
-    const extension = originalName.split(".").pop();
+    // Extension lowercase damit DB-URL und tatsächlicher Dateiname (PHP lowercased) übereinstimmen
+    const extension = (originalName.split(".").pop() ?? "bin").toLowerCase();
     const nameWithoutExt = originalName.replace(/\.[^/.]+$/, "");
     const sanitizedName = this.sanitizeFilename(nameWithoutExt);
     return `${sanitizedName}_${timestamp}_${randomSuffix}.${extension}`;

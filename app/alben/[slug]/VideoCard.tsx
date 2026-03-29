@@ -21,7 +21,7 @@ function formatDuration(seconds: number): string {
 }
 
 /**
- * MIME-Typ aus Dateiendung ableiten – Fallback wenn kein mimeType aus DB vorhanden.
+ * MIME-Typ aus Dateiendung ableiten (für das Format-Badge auf der Kachel).
  * Ignoriert Query-Parameter (?foo=bar) korrekt.
  */
 function getVideoMimeType(url: string): string {
@@ -38,32 +38,15 @@ function getVideoMimeType(url: string): string {
   return map[ext] || "video/mp4";
 }
 
-/**
- * Gibt alle Source-Einträge zurück.
- * Für MOV/QuickTime wird auch video/mp4 probiert, da viele .mov-Dateien
- * H.264-codiert sind und Chrome diese als video/mp4 abspielen kann.
- */
-function getVideoSources(
-  fileUrl: string,
-  mimeType: string | null | undefined
-): Array<{ type: string }> {
-  const primary = mimeType || getVideoMimeType(fileUrl);
-  const sources: Array<{ type: string }> = [{ type: primary }];
-  if (primary === "video/quicktime") {
-    sources.push({ type: "video/mp4" });
-  }
-  return sources;
-}
-
 /** Gibt eine lesbare Format-Bezeichnung zurück */
 function formatLabel(mimeType: string): string {
   const ext = mimeType.split("/")[1] ?? mimeType;
   const map: Record<string, string> = {
-    "quicktime":   "QuickTime/MOV",
-    "x-msvideo":   "AVI",
-    "x-matroska":  "MKV",
-    "mp4":         "MP4",
-    "webm":        "WebM",
+    quicktime:  "QuickTime/MOV",
+    "x-msvideo":  "AVI",
+    "x-matroska": "MKV",
+    mp4:          "MP4",
+    webm:         "WebM",
   };
   return map[ext] ?? ext.toUpperCase();
 }
@@ -78,11 +61,11 @@ export default function VideoCard({
   mimeType,
 }: VideoCardProps) {
   const [open, setOpen] = useState(false);
-  /** Nur true wenn der Browser einen echten Wiedergabefehler meldet */
+  /** true sobald der Browser einen echten Abspiel-Fehler meldet */
   const [playError, setPlayError] = useState(false);
 
+  // Nur fürs Format-Badge auf der Kachel
   const effectiveMimeType = mimeType || getVideoMimeType(fileUrl);
-  const sources = getVideoSources(fileUrl, mimeType);
 
   // Fehler-State zurücksetzen wenn Modal neu geöffnet wird
   useEffect(() => {
@@ -185,7 +168,7 @@ export default function VideoCard({
                     Das Video konnte nicht abgespielt werden. Das Format{" "}
                     <strong>{formatLabel(effectiveMimeType)}</strong> wird von
                     deinem Browser möglicherweise nicht unterstützt, oder die
-                    Datei ist beschädigt.
+                    Datei ist nicht erreichbar.
                   </span>
                 </div>
                 <a
@@ -200,17 +183,21 @@ export default function VideoCard({
               </div>
             )}
 
+            {/*
+              Proxy-URL verwenden: Videos werden server-seitig von pics.frank-sellke.de
+              durchgeleitet. Das umgeht Hotlink-Sperren des Hosters und erlaubt
+              korrekte Range-Request-Unterstützung für Seeking.
+            */}
             <video
+              key={fileUrl}
+              src={`/api/video-download?url=${encodeURIComponent(fileUrl)}&filename=${encodeURIComponent(filename)}&inline=1`}
               controls
               autoPlay
+              playsInline
               className="w-full rounded-xl shadow-2xl bg-black"
               style={{ maxHeight: "80vh" }}
               onError={() => setPlayError(true)}
-            >
-              {sources.map((s) => (
-                <source key={s.type} src={fileUrl} type={s.type} />
-              ))}
-            </video>
+            />
 
             {(title || filename) && (
               <p className="text-white/70 text-sm text-center font-medium">

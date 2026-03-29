@@ -81,10 +81,10 @@ export async function POST(request: NextRequest) {
     const uploadResponse = await fetch(phpEndpoint, {
       method: "POST",
       headers: {
-        "X-API-Key":    process.env.UPLOAD_API_KEY || "",
-        "X-Upload-Path": phpPath,
-        "X-Upload-Name": finalFileName,
-        "Content-Type":  file.type || "application/octet-stream",
+        "X-API-Key":      process.env.UPLOAD_API_KEY || "",
+        "X-Upload-Path":  phpPath,
+        "X-Upload-Name":  finalFileName,
+        "Content-Type":   file.type || "application/octet-stream",
         "Content-Length": String(file.size),
       },
       body: fileBuffer,
@@ -99,12 +99,27 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // URLs zusammenstellen (mit Album-Unterordner wenn vorhanden)
-    const fileUrl = albumSlug
-      ? `${targetConfig.remote}${albumSlug}/${finalFileName}`
-      : `${targetConfig.remote}${finalFileName}`;
+    // PHP-Antwort parsen – fileUrl kommt direkt vom Server und ist garantiert korrekt.
+    // (PHP bereinigt/normalisiert den Dateinamen; wir verwenden daher NICHT den lokal
+    //  generierten Namen, um Inkonsistenzen zwischen DB und tatsächlichem Dateinamen
+    //  zu vermeiden.)
+    let phpResult: { fileName?: string; fileUrl?: string } = {};
+    try {
+      phpResult = await uploadResponse.json();
+    } catch {
+      console.warn("PHP-Antwort konnte nicht als JSON gelesen werden – verwende lokale URL-Konstruktion");
+    }
 
-    const thumbName = finalFileName.replace(/\.[^/.]+$/, "_thumb.jpg");
+    // PHP-URL bevorzugen; Fallback: lokal konstruierte URL
+    const actualFileName = phpResult.fileName ?? finalFileName;
+    const fileUrl = phpResult.fileUrl ?? (
+      albumSlug
+        ? `${targetConfig.remote}${albumSlug}/${actualFileName}`
+        : `${targetConfig.remote}${actualFileName}`
+    );
+
+    // Thumbnail-URL: Dateiname ggf. von PHP (lowercase) übernehmen
+    const thumbName = actualFileName.replace(/\.[^/.]+$/, "_thumb.jpg");
     const thumbnailUrl = targetConfig.thumbnailPath
       ? albumSlug
         ? `${targetConfig.thumbnailPath}${albumSlug}/${thumbName}`
@@ -113,7 +128,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      fileName: finalFileName,
+      fileName: actualFileName,
       fileUrl,
       thumbnailUrl,
     });
