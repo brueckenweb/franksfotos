@@ -1,6 +1,6 @@
 {
   "name": "franksfotos",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "scripts": {
     "dev": "next dev",
@@ -18,6 +18,13 @@
     "tunnel": "ssh -L 3307:localhost:3306 franksellke@87.118.90.98 -N"
   },
   "dependencies": {
+    "@tiptap/extension-color": "^3.21.0",
+    "@tiptap/extension-link": "^3.21.0",
+    "@tiptap/extension-text-align": "^3.21.0",
+    "@tiptap/extension-text-style": "^3.21.0",
+    "@tiptap/extension-underline": "^3.21.0",
+    "@tiptap/react": "^3.21.0",
+    "@tiptap/starter-kit": "^3.21.0",
     "@types/leaflet": "^1.9.21",
     "@types/nodemailer": "^7.0.11",
     "bcryptjs": "^3.0.3",

@@ -1,7 +1,18 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { useState } from "react";
 import { Mail, Send, Users, AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
+
+// TipTap benötigt Browser-APIs → SSR deaktivieren
+const EmailEditor = dynamic(() => import("@/components/admin/EmailEditor"), {
+  ssr: false,
+  loading: () => (
+    <div className="h-64 bg-gray-800 border border-gray-700 rounded-lg flex items-center justify-center">
+      <Loader2 className="w-6 h-6 animate-spin text-amber-400" />
+    </div>
+  ),
+});
 
 export default function AdminEmailPage() {
   const [subject, setSubject] = useState("");
@@ -14,7 +25,6 @@ export default function AdminEmailPage() {
     errors?: string[];
     error?: string;
   } | null>(null);
-  const [showPreview, setShowPreview] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -90,31 +100,12 @@ export default function AdminEmailPage() {
               />
             </div>
 
-            {/* Inhalt */}
+            {/* WYSIWYG-Editor */}
             <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="block text-sm font-medium text-gray-300">
-                  Inhalt (HTML erlaubt) *
-                </label>
-                <button
-                  type="button"
-                  onClick={() => setShowPreview(!showPreview)}
-                  className="text-xs text-amber-400 hover:text-amber-300 transition-colors"
-                >
-                  {showPreview ? "Vorschau ausblenden" : "Vorschau anzeigen"}
-                </button>
-              </div>
-              <textarea
-                value={htmlContent}
-                onChange={(e) => setHtmlContent(e.target.value)}
-                placeholder={`<p>Hallo,</p>\n<p>ich freue mich, euch mitteilen zu können, dass neue Fotos online sind!</p>\n<p>Viel Spaß beim Anschauen,<br>Frank</p>`}
-                required
-                rows={12}
-                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-3 text-white placeholder-gray-500 focus:outline-none focus:border-amber-500 focus:ring-1 focus:ring-amber-500 transition-colors font-mono text-sm resize-y"
-              />
-              <p className="text-xs text-gray-500 mt-1">
-                Du kannst HTML-Tags verwenden. Der Inhalt wird automatisch in das FranksFotos-E-Mail-Layout eingebettet.
-              </p>
+              <label className="block text-sm font-medium text-gray-300 mb-2">
+                Inhalt *
+              </label>
+              <EmailEditor value={htmlContent} onChange={setHtmlContent} />
             </div>
 
             {/* Empfänger-Hinweis */}
@@ -202,21 +193,23 @@ export default function AdminEmailPage() {
           </form>
         </div>
 
-        {/* Vorschau */}
+        {/* Live-Vorschau */}
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
           <h2 className="text-lg font-semibold text-white mb-6">
             📧 E-Mail-Vorschau
           </h2>
-          {showPreview && htmlContent ? (
-            <div className="bg-white rounded-lg overflow-hidden">
-              {/* Simulierter Email-Header */}
-              <div className="bg-[#1a1a2e] p-6">
+          {htmlContent ? (
+            <div className="bg-white rounded-lg overflow-hidden shadow-lg">
+              {/* Simulierter E-Mail-Header */}
+              <div className="bg-[#1a1a2e] px-6 py-5">
                 <h1 className="text-amber-400 font-bold text-lg m-0">📸 FranksFotos</h1>
               </div>
+              {/* Inhalt */}
               <div
-                className="p-6 text-sm"
+                className="p-6 text-sm text-gray-800 leading-relaxed"
                 dangerouslySetInnerHTML={{ __html: htmlContent }}
               />
+              {/* Footer */}
               <div className="px-6 py-3 bg-gray-50 border-t text-center">
                 <p className="text-gray-400 text-xs">
                   FranksFotos · fotos.frank-sellke.de
@@ -226,10 +219,8 @@ export default function AdminEmailPage() {
           ) : (
             <div className="flex flex-col items-center justify-center h-64 text-gray-600">
               <Mail className="w-12 h-12 mb-3 opacity-30" />
-              <p className="text-sm">
-                {!htmlContent
-                  ? "Gib einen Inhalt ein, um die Vorschau zu sehen"
-                  : "Klicke auf 'Vorschau anzeigen' oben, um die Vorschau zu aktivieren"}
+              <p className="text-sm text-center">
+                Beginne mit dem Schreiben, um die Vorschau zu sehen
               </p>
             </div>
           )}

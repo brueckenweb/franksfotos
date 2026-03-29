@@ -11,6 +11,9 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
     steps:
       - uses: actions/checkout@v4
 
@@ -247,6 +250,32 @@ jobs:
             echo "=== PM2 Logs (neueste Fehler) ==="
             pm2 logs franksfotos-prod --lines 10 --nostream --err 2>/dev/null || true
           '
+
+      - name: Lösche alte Workflow-Runs (älter als 14 Tage)
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "=== Lösche Workflow-Runs älter als 14 Tage ==="
+          CUTOFF_DATE=$(date -d '14 days ago' --iso-8601=seconds)
+          echo "Stichtag: $CUTOFF_DATE"
+          DELETED=0
+          FAILED=0
+          gh run list \
+            --repo ${{ github.repository }} \
+            --limit 100 \
+            --json databaseId,createdAt,status \
+            --jq ".[] | select(.createdAt < \"$CUTOFF_DATE\") | .databaseId" | \
+          while read -r run_id; do
+            if gh run delete "$run_id" --repo ${{ github.repository }} 2>/dev/null; then
+              echo "✓ Gelöscht: Run #$run_id"
+              DELETED=$((DELETED + 1))
+            else
+              echo "⚠ Fehler beim Löschen: Run #$run_id"
+              FAILED=$((FAILED + 1))
+            fi
+          done
+          echo "✓ Cleanup abgeschlossen"
 
       - name: Aufräumen
         if: always()
