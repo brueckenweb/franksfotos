@@ -1,3 +1,6 @@
+// Erzwingt dynamisches Server-Rendering – verhindert Build-Fehler durch auth() / headers()
+export const dynamic = 'force-dynamic';
+
 import Link from "next/link";
 import { db } from "@/lib/db";
 import { albums, albumVisibility, groups, photos } from "@/lib/db/schema";
