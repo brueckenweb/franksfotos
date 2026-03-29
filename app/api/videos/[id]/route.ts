@@ -61,18 +61,22 @@ export async function PUT(
     const { id } = await params;
     const videoId = parseInt(id);
     const body = await request.json();
-    const { title, description, albumId, isPrivate, sortOrder, bnummer } = body;
+    const { title, description, albumId, isPrivate, sortOrder, bnummer, thumbnailUrl } = body;
+
+    // Nur die Felder setzen, die im Body enthalten sind
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const updateData: Record<string, any> = {};
+    if ("title"        in body) updateData.title        = title        ?? null;
+    if ("description"  in body) updateData.description  = description  ?? null;
+    if ("albumId"      in body) updateData.albumId      = albumId      ?? null;
+    if ("isPrivate"    in body) updateData.isPrivate    = isPrivate    ?? false;
+    if ("sortOrder"    in body) updateData.sortOrder    = sortOrder    ?? 0;
+    if ("bnummer"      in body) updateData.bnummer      = bnummer      ?? null;
+    if ("thumbnailUrl" in body) updateData.thumbnailUrl = thumbnailUrl ?? null;
 
     await db
       .update(videos)
-      .set({
-        title: title ?? null,
-        description: description ?? null,
-        albumId: albumId ?? null,
-        isPrivate: isPrivate ?? false,
-        sortOrder: sortOrder ?? 0,
-        bnummer: bnummer ?? null,
-      })
+      .set(updateData)
       .where(eq(videos.id, videoId));
 
     return NextResponse.json({ success: true });

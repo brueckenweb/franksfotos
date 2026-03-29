@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Play, X, Download, AlertTriangle } from "lucide-react";
+import { Play, X, Download, AlertTriangle, Loader2 } from "lucide-react";
 
 interface VideoCardProps {
   filename: string;
@@ -63,13 +63,18 @@ export default function VideoCard({
   const [open, setOpen] = useState(false);
   /** true sobald der Browser einen echten Abspiel-Fehler meldet */
   const [playError, setPlayError] = useState(false);
+  /** true solange Video initial lädt oder puffert */
+  const [isLoading, setIsLoading] = useState(false);
 
   // Nur fürs Format-Badge auf der Kachel
   const effectiveMimeType = mimeType || getVideoMimeType(fileUrl);
 
-  // Fehler-State zurücksetzen wenn Modal neu geöffnet wird
+  // Fehler- und Lade-State zurücksetzen wenn Modal neu geöffnet wird
   useEffect(() => {
-    if (open) setPlayError(false);
+    if (open) {
+      setPlayError(false);
+      setIsLoading(true); // Video muss immer erst laden
+    }
   }, [open]);
 
   // Escape-Taste schließt Modal
@@ -188,16 +193,29 @@ export default function VideoCard({
               durchgeleitet. Das umgeht Hotlink-Sperren des Hosters und erlaubt
               korrekte Range-Request-Unterstützung für Seeking.
             */}
-            <video
-              key={fileUrl}
-              src={`/api/video-download?url=${encodeURIComponent(fileUrl)}&filename=${encodeURIComponent(filename)}&inline=1`}
-              controls
-              autoPlay
-              playsInline
-              className="w-full rounded-xl shadow-2xl bg-black"
-              style={{ maxHeight: "80vh" }}
-              onError={() => setPlayError(true)}
-            />
+            <div className="relative">
+              {/* Lade-Overlay: sichtbar solange Video noch nicht bereit ist */}
+              {isLoading && !playError && (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/80 rounded-xl">
+                  <Loader2 className="w-10 h-10 text-white/70 animate-spin" />
+                  <p className="text-white/50 text-sm">Video wird geladen…</p>
+                </div>
+              )}
+              <video
+                key={fileUrl}
+                src={`/api/video-download?url=${encodeURIComponent(fileUrl)}&filename=${encodeURIComponent(filename)}&inline=1`}
+                controls
+                autoPlay
+                playsInline
+                className="w-full rounded-xl shadow-2xl bg-black"
+                style={{ maxHeight: "80vh" }}
+                onLoadStart={() => setIsLoading(true)}
+                onCanPlay={() => setIsLoading(false)}
+                onPlaying={() => setIsLoading(false)}
+                onWaiting={() => setIsLoading(true)}
+                onError={() => { setIsLoading(false); setPlayError(true); }}
+              />
+            </div>
 
             {(title || filename) && (
               <p className="text-white/70 text-sm text-center font-medium">
