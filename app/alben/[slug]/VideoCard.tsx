@@ -12,10 +12,6 @@ interface VideoCardProps {
   duration?: number | null;
   /** MIME-Typ aus der Datenbank (bevorzugt gegenüber URL-Ableitung) */
   mimeType?: string | null;
-  /** Originale Breite des Videos in Pixel (für korrektes Seitenverhältnis im Modal) */
-  width?: number | null;
-  /** Originale Höhe des Videos in Pixel (für korrektes Seitenverhältnis im Modal) */
-  height?: number | null;
 }
 
 function formatDuration(seconds: number): string {
@@ -63,8 +59,6 @@ export default function VideoCard({
   thumbnailUrl,
   duration,
   mimeType,
-  width,
-  height,
 }: VideoCardProps) {
   const [open, setOpen] = useState(false);
   /** true sobald der Browser einen echten Abspiel-Fehler meldet */
@@ -199,14 +193,7 @@ export default function VideoCard({
               durchgeleitet. Das umgeht Hotlink-Sperren des Hosters und erlaubt
               korrekte Range-Request-Unterstützung für Seeking.
             */}
-            <div
-              className="relative"
-              style={
-                width && height
-                  ? { aspectRatio: `${width}/${height}`, maxHeight: "80vh" }
-                  : undefined
-              }
-            >
+            <div className="relative">
               {/* Lade-Overlay: sichtbar solange Video noch nicht bereit ist */}
               {isLoading && !playError && (
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-black/80 rounded-xl">
@@ -220,8 +207,8 @@ export default function VideoCard({
                 controls
                 autoPlay
                 playsInline
-                className="w-full h-full rounded-xl shadow-2xl bg-black"
-                style={!(width && height) ? { maxHeight: "80vh" } : undefined}
+                className="w-full rounded-xl shadow-2xl bg-black"
+                style={{ maxHeight: "80vh" }}
                 onLoadStart={() => setIsLoading(true)}
                 onCanPlay={() => setIsLoading(false)}
                 onPlaying={() => setIsLoading(false)}

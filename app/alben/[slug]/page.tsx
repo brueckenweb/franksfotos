@@ -655,8 +655,6 @@ export default async function AlbumPage({ params }: Props) {
                   thumbnailUrl={video.thumbnailUrl ?? null}
                   duration={video.duration ?? null}
                   mimeType={video.mimeType ?? null}
-                  width={video.width ?? null}
-                  height={video.height ?? null}
                 />
               ))}
             </div>
