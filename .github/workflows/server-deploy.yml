@@ -20,242 +20,188 @@ jobs:
               echo "SSH_KEY ist NICHT gesetzt!"
               exit 1
           else
-              echo "SERVER_SSH_KEY ist gesetzt (Inhalt wird nicht angezeigt)."
+              echo "SERVER_SSH_KEY ist gesetzt."
           fi
 
+      - name: Erstelle SSH-Key-Datei
+        run: |
+          echo "${{ secrets.SERVER_SSH_KEY }}" > /tmp/ssh_key
+          chmod 600 /tmp/ssh_key
+          echo "✓ SSH-Key erstellt"
+
       - name: Teste SSH-Verbindung
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          script: |
-            echo 'SSH-Verbindung erfolgreich!'
+        run: |
+          ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
+            echo "SSH-Verbindung erfolgreich!"
             whoami
             pwd
+          '
 
       - name: Erstelle .env.production aus Secret (für Build)
         env:
           FRANKSFOTOS_ENV: ${{ secrets.FRANKSFOTOS_ENV }}
         run: |
-          echo "=== Erstelle .env.production aus Secret ==="
           printf '%s\n' "$FRANKSFOTOS_ENV" > .env.production
-          echo "Anzahl Zeilen: $(wc -l < .env.production)"
-          echo "✓ .env.production erstellt"
+          echo "✓ .env.production erstellt ($(wc -l < .env.production) Zeilen)"
 
       - name: Install dependencies
         run: npm install --legacy-peer-deps
-            
+
       - name: Build
         run: npm run build
 
-      - name: Prüfe Zielverzeichnis
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          script: |
-            echo "=== Prüfe Zielverzeichnis /home/users/franksellke/www/frank-sellke ==="
-            echo "Aktueller Benutzer: $(whoami)"
-
-            # Erstelle Verzeichnis falls nicht vorhanden
-            mkdir -p /home/users/franksellke/www/frank-sellke
-            mkdir -p /home/users/franksellke/www/frank-sellke/log/pm2
-
-            # Teste Schreibrechte
-            if touch /home/users/franksellke/www/frank-sellke/test-write 2>/dev/null; then
-                rm /home/users/franksellke/www/frank-sellke/test-write
-                echo "✓ Schreibrechte in /home/users/franksellke/www/frank-sellke: OK"
-            else
-                echo "✗ Schreibrechte FEHLER"
-                exit 1
-            fi
+      - name: Prüfe Build-Output
+        run: |
+          echo "=== Build-Überprüfung ==="
+          ls -la .next/server/app/ | head -20
+          echo "Routen-Dateien vorhanden:"
+          [ -f ".next/server/app/page.js" ] && echo "✓ .next/server/app/page.js (Root-Route)" || echo "✗ ROOT PAGE FEHLT!"
+          [ -d ".next/server/app/admin" ] && echo "✓ admin-Route" || echo "✗ admin fehlt"
 
       - name: Synchronisiere neue Dateien vom Server ins Repository
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          script: |
-            echo "=== Synchronisiere neue Dateien aus public ins Repository ==="
+        run: |
+          ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
             cd /home/users/franksellke/www/frank-sellke
-            git config --global user.email "github-actions@github.com"
-            git config --global user.name "GitHub Actions"
+            git config user.email "github-actions@github.com"
+            git config user.name "GitHub Actions"
             git pull origin main
             git add public/
             if ! git diff --cached --quiet; then
               git commit -m "Sync neue/aktualisierte Dateien aus public von Server"
               git push origin main
-              echo "✓ Änderungen aus public ins Repository gepusht."
+              echo "✓ public-Dateien ins Repository gepusht."
             else
-              echo "Keine neuen oder geänderten Dateien in public gefunden."
+              echo "Keine neuen Dateien in public."
             fi
-
-      - name: Bereite Zielverzeichnis vor
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          script: |
-            echo "=== Bereite /home/users/franksellke/www/frank-sellke vor ==="
-            ls -la /home/users/franksellke/www/frank-sellke/
-
-            # Lösche alte Deployment-Dateien (behalte subdomain_pics, .git, log)
-            cd /home/users/franksellke/www/frank-sellke
-            rm -rf .next package.json public ecosystem.config.cjs .env.production .htaccess 2>/dev/null || true
-
-            echo "Verzeichnis bereit:"
-            ls -la /home/users/franksellke/www/frank-sellke/
-
-      - name: Erstelle .env.production aus Secret
-        env:
-          FRANKSFOTOS_ENV: ${{ secrets.FRANKSFOTOS_ENV }}
-        run: |
-          echo "=== Erstelle .env.production aus Secret ==="
-          printf '%s\n' "$FRANKSFOTOS_ENV" > .env.production
-          echo "Anzahl Zeilen: $(wc -l < .env.production)"
-          echo "✓ .env.production erstellt"
-
-      - name: Erstelle tar-Archiv für SSH-Upload
-        run: |
-          echo "=== Erstelle tar-Archiv für SSH-Upload ==="
-          
-          # Stelle sicher dass public-Verzeichnis existiert
-          mkdir -p public
-          echo "Inhalt public-Verzeichnis:"
-          ls -la public/
-
-          echo "Füge .env.production zum Archiv hinzu..."
-          tar -czf deployment.tar.gz .next package.json public ecosystem.config.cjs .env.production .htaccess
-          ls -la deployment.tar.gz
-          echo "Archiv-Größe: $(du -h deployment.tar.gz | cut -f1)"
-
-      - name: Übertrage Dateien über SSH (base64)
-        run: |
-          echo "=== Übertrage deployment.tar.gz über SSH ==="
-
-          # Erstelle temporäre SSH-Key-Datei
-          echo "${{ secrets.SERVER_SSH_KEY }}" > /tmp/ssh_key
-          chmod 600 /tmp/ssh_key
-
-          # Konvertiere zu base64 und übertrage
-          base64 deployment.tar.gz | ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
-            echo "=== Empfange base64-Daten ==="
-            base64 -d > /home/users/franksellke/www/frank-sellke/deployment.tar.gz
-
-            echo "=== Entpacke Archiv ==="
-            cd /home/users/franksellke/www/frank-sellke
-            tar -xzf deployment.tar.gz
-            rm deployment.tar.gz
-
-            echo "=== Deployment erfolgreich ==="
-            ls -la /home/users/franksellke/www/frank-sellke/
-
-            echo "=== Prüfe wichtige Dateien ==="
-            [ -f "package.json" ] && echo "✓ package.json vorhanden" || echo "✗ package.json fehlt"
-            [ -d ".next" ] && echo "✓ .next Verzeichnis vorhanden" || echo "✗ .next Verzeichnis fehlt"
-            [ -d "public" ] && echo "✓ public Verzeichnis vorhanden" || echo "✗ public Verzeichnis fehlt"
-            [ -f "ecosystem.config.cjs" ] && echo "✓ ecosystem.config.cjs vorhanden" || echo "✗ ecosystem.config.cjs fehlt"
           '
 
-          # Lösche temporäre SSH-Key-Datei
-          rm -f /tmp/ssh_key
-
-      - name: Install Dependencies
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          timeout: 120s
-          command_timeout: 120s
-          script: |
-            echo "=== Installiere Dependencies ==="
+      - name: Bereite Zielverzeichnis vor (alte Dateien löschen)
+        run: |
+          ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
             cd /home/users/franksellke/www/frank-sellke
+            echo "Vor dem Löschen:"
+            ls -la
+            rm -rf .next package.json package-lock.json public ecosystem.config.cjs .env.production .htaccess
+            mkdir -p log/pm2
+            echo "Nach dem Löschen:"
+            ls -la
+          '
 
-            if [ -f "package.json" ]; then
-                echo "package.json gefunden, installiere Dependencies..."
-                npm install --legacy-peer-deps
-                echo "Dependencies installiert"
-            else
-                echo "WARNUNG: package.json nicht gefunden!"
-                ls -la
-                exit 1
+      - name: Erstelle tar-Archiv
+        run: |
+          mkdir -p public
+          tar -czf deployment.tar.gz \
+            .next \
+            package.json \
+            package-lock.json \
+            public \
+            ecosystem.config.cjs \
+            .env.production \
+            .htaccess
+          echo "✓ Archiv erstellt: $(du -h deployment.tar.gz | cut -f1)"
+
+      - name: Übertrage Archiv via SCP
+        run: |
+          echo "=== Übertrage deployment.tar.gz via SCP ==="
+          scp -o StrictHostKeyChecking=no -i /tmp/ssh_key \
+            deployment.tar.gz \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:/home/users/franksellke/www/frank-sellke/deployment.tar.gz
+          echo "✓ Übertragung abgeschlossen"
+
+      - name: Entpacke Archiv auf Server
+        run: |
+          ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
+            set -e
+            cd /home/users/franksellke/www/frank-sellke
+            echo "=== Entpacke deployment.tar.gz ==="
+            tar -xzf deployment.tar.gz
+            if [ $? -ne 0 ]; then
+              echo "❌ FEHLER beim Entpacken!"
+              exit 1
             fi
+            rm deployment.tar.gz
+            echo "✓ Archiv entpackt"
 
-      - name: Stop PM2 Application
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          timeout: 60s
-          command_timeout: 60s
-          script: |
-            echo "=== Stoppe PM2 Application 'franksfotos-prod' ==="
+            echo "=== Verzeichnisinhalt nach Entpacken ==="
+            ls -la
 
-            pm2 list || echo "PM2 noch nicht initialisiert"
-            pm2 stop franksfotos-prod 2>/dev/null || echo "franksfotos-prod war nicht aktiv"
-            pm2 delete franksfotos-prod 2>/dev/null || echo "franksfotos-prod war nicht registriert"
+            echo "=== Wichtige Dateien prüfen ==="
+            [ -f "package.json" ]           && echo "✓ package.json" || { echo "✗ package.json FEHLT"; exit 1; }
+            [ -d ".next" ]                  && echo "✓ .next/" || { echo "✗ .next FEHLT"; exit 1; }
+            [ -f ".next/server/app/page.js" ] && echo "✓ Root-Route page.js" || echo "⚠ Root-Route page.js nicht gefunden!"
+            [ -d "public" ]                 && echo "✓ public/" || echo "⚠ public fehlt"
+            [ -f "ecosystem.config.cjs" ]   && echo "✓ ecosystem.config.cjs" || { echo "✗ ecosystem.config.cjs FEHLT"; exit 1; }
+          '
 
+      - name: Install Dependencies auf Server
+        run: |
+          ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
+            set -e
+            cd /home/users/franksellke/www/frank-sellke
+            echo "=== Installiere Dependencies (npm ci) ==="
+            npm ci --legacy-peer-deps --omit=dev
+            echo "✓ Dependencies installiert"
+          '
+
+      - name: Stoppe PM2
+        run: |
+          ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
+            pm2 stop franksfotos-prod 2>/dev/null || echo "War nicht aktiv"
+            pm2 delete franksfotos-prod 2>/dev/null || echo "War nicht registriert"
             pm2 list
-            echo "✅ PM2 Application gestoppt und bereinigt"
+            echo "✓ PM2 bereinigt"
+          '
 
-      - name: Start PM2 Application
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.SERVER_HOST }}
-          username: ${{ secrets.SERVER_USER }}
-          key: ${{ secrets.SERVER_SSH_KEY }}
-          timeout: 120s
-          command_timeout: 120s
-          script: |
-            echo "=== Starte PM2 Application 'franksfotos-prod' ==="
+      - name: Starte PM2
+        run: |
+          ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
+            set -e
             cd /home/users/franksellke/www/frank-sellke
-
-            if [ ! -f "ecosystem.config.cjs" ]; then
-                echo "❌ FEHLER: ecosystem.config.cjs nicht gefunden!"
-                ls -la
-                exit 1
-            fi
-
-            if [ ! -d ".next" ]; then
-                echo "❌ FEHLER: .next Verzeichnis nicht gefunden!"
-                ls -la
-                exit 1
-            fi
-
             export NODE_ENV=production
-
-            echo "Starte franksfotos-prod mit PM2..."
             pm2 start ecosystem.config.cjs
-
-            sleep 10
+            sleep 15
 
             echo "=== PM2 Status ==="
             pm2 list
 
             if pm2 list | grep -q "franksfotos-prod.*online"; then
-                echo "✅ franksfotos-prod läuft erfolgreich!"
-
-                echo "=== Aktuelle Logs ==="
-                pm2 logs franksfotos-prod --lines 10 --nostream || echo "Logs noch nicht verfügbar"
-
-                echo "=== Port Status ==="
-                if ss -tlnp | grep -q ":3001 "; then
-                    echo "✅ Port 3001 ist aktiv"
-                else
-                    echo "⚠️ Port 3001 noch nicht aktiv (kann bei Startup normal sein)"
-                fi
-
-                pm2 save
-                echo "✅ PM2 Konfiguration gespeichert"
-
+              echo "✅ franksfotos-prod läuft!"
             else
-                echo "❌ FEHLER: franksfotos-prod konnte nicht gestartet werden!"
-                pm2 logs franksfotos-prod --lines 20 --nostream || echo "Keine Logs verfügbar"
-                exit 1
+              echo "❌ franksfotos-prod läuft NICHT!"
+              pm2 logs franksfotos-prod --lines 30 --nostream || true
+              exit 1
             fi
+
+            echo "=== PM2 Logs (letzte 15 Zeilen) ==="
+            pm2 logs franksfotos-prod --lines 15 --nostream || true
+
+            echo "=== Port 3001 prüfen ==="
+            if ss -tlnp 2>/dev/null | grep -q ":3001 "; then
+              echo "✅ Port 3001 aktiv"
+            else
+              echo "⚠ Port 3001 noch nicht sichtbar"
+            fi
+
+            pm2 save
+          '
+
+      - name: Teste Root-Route direkt auf Server
+        run: |
+          ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
+            sleep 5
+            echo "=== Teste http://localhost:3001/ ==="
+            HTTP_STATUS=$(curl -s -o /tmp/curl_output.txt -w "%{http_code}" http://localhost:3001/ 2>/dev/null || echo "FEHLER")
+            echo "HTTP Status: $HTTP_STATUS"
+            if [ "$HTTP_STATUS" = "200" ]; then
+              echo "✅ Root-Route antwortet mit 200 OK!"
+            elif [ "$HTTP_STATUS" = "FEHLER" ]; then
+              echo "❌ curl konnte localhost:3001 nicht erreichen – Next.js läuft nicht!"
+            else
+              echo "⚠ HTTP Status: $HTTP_STATUS"
+              head -5 /tmp/curl_output.txt
+            fi
+          '
+
+      - name: Aufräumen
+        if: always()
+        run: rm -f /tmp/ssh_key
