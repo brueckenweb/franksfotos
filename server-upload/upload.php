@@ -177,7 +177,13 @@ if ($isRawUpload) {
     $realMime = finfo_file($finfo, $tmpFile);
     finfo_close($finfo);
 
-    if (!in_array($realMime, $ALLOWED_TYPES)) {
+    // Manche Videoformate (MP4, MOV, MKV) werden von älteren libmagic-Versionen
+    // als application/octet-stream erkannt. In diesem Fall vertrauen wir dem
+    // deklarierten Content-Type-Header, der bereits oben gegen $ALLOWED_TYPES
+    // validiert wurde.
+    if ($realMime === 'application/octet-stream') {
+        $realMime = $mimeType;
+    } elseif (!in_array($realMime, $ALLOWED_TYPES)) {
         @unlink($tmpFile);
         jsonError("Echter MIME-Type nicht erlaubt: $realMime", 400);
     }
