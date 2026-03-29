@@ -226,8 +226,26 @@ jobs:
             fi
 
             echo ""
+            echo "=== Apache Access Log (letzte 20 Zeilen) ==="
+            tail -20 /home/users/franksellke/logs/frank-sellke.de/access.log 2>/dev/null || echo "Log nicht zugänglich"
+
+            echo ""
+            echo "=== Apache Error Log (letzte 10 Zeilen) ==="
+            tail -10 /home/users/franksellke/logs/frank-sellke.de/error.log 2>/dev/null || echo "Error-Log nicht zugänglich"
+
+            echo ""
+            echo "=== .htaccess Inhalt auf dem Server ==="
+            cat /home/users/franksellke/www/frank-sellke/.htaccess 2>/dev/null || echo ".htaccess nicht gefunden!"
+
+            echo ""
+            echo "=== Apache Module prüfen ==="
+            apache2ctl -M 2>/dev/null | grep -E "proxy|rewrite" || \
+            apachectl -M 2>/dev/null | grep -E "proxy|rewrite" || \
+            echo "Apache Module nicht prüfbar"
+
+            echo ""
             echo "=== PM2 Logs (neueste Fehler) ==="
-            pm2 logs franksfotos-prod --lines 20 --nostream --err 2>/dev/null || true
+            pm2 logs franksfotos-prod --lines 10 --nostream --err 2>/dev/null || true
           '
 
       - name: Aufräumen
