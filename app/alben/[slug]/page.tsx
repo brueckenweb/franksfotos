@@ -23,6 +23,7 @@ import DownloadButton from "./DownloadButton";
 import PhotoThumbnail from "./PhotoThumbnail";
 import AlbumCoverHero from "./AlbumCoverHero";
 import AlbumSlideshow from "./AlbumSlideshow";
+import VideoCard from "./VideoCard";
 
 type Props = { params: Promise<{ slug: string }> };
 
@@ -641,34 +642,14 @@ export default async function AlbumPage({ params }: Props) {
             </h2>
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {albumVideos.map((video) => (
-                <div
+                <VideoCard
                   key={video.id}
-                  className="group relative bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-gray-700 transition-colors"
-                >
-                  <div className="aspect-video bg-gray-800 relative overflow-hidden">
-                    {video.thumbnailUrl ? (
-                      <img
-                        src={video.thumbnailUrl}
-                        alt={video.title || video.filename}
-                        className="w-full h-full object-cover"
-                      />
-                    ) : (
-                      <div className="w-full h-full flex items-center justify-center">
-                        <Play className="w-10 h-10 text-gray-600" />
-                      </div>
-                    )}
-                    <div className="absolute inset-0 flex items-center justify-center bg-black/20 group-hover:bg-black/40 transition-colors">
-                      <div className="w-12 h-12 rounded-full bg-white/20 backdrop-blur flex items-center justify-center">
-                        <Play className="w-5 h-5 text-white ml-0.5" />
-                      </div>
-                    </div>
-                  </div>
-                  <div className="p-3">
-                    <p className="text-sm font-medium text-white truncate">
-                      {video.title || video.filename}
-                    </p>
-                  </div>
-                </div>
+                  filename={video.filename}
+                  title={video.title ?? null}
+                  fileUrl={video.fileUrl}
+                  thumbnailUrl={video.thumbnailUrl ?? null}
+                  duration={video.duration ?? null}
+                />
               ))}
             </div>
           </section>

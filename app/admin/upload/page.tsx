@@ -22,6 +22,78 @@ interface Album {
   parentId: number | null;
 }
 
+/**
+ * Extrahiert einen Frame aus einem Video als JPEG-Blob (Client-Side, Canvas).
+ * Gibt null zurück wenn das Video nicht geladen werden kann.
+ */
+function generateVideoThumbnail(videoFile: File): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    const video = document.createElement("video");
+    video.preload = "metadata";
+    video.muted = true;
+    video.playsInline = true;
+
+    const url = URL.createObjectURL(videoFile);
+    video.src = url;
+
+    let resolved = false;
+    const cleanup = () => {
+      if (!resolved) {
+        resolved = true;
+        URL.revokeObjectURL(url);
+      }
+    };
+
+    // Auf Fehler → null zurückgeben
+    video.addEventListener("error", () => {
+      cleanup();
+      resolve(null);
+    });
+
+    video.addEventListener("loadedmetadata", () => {
+      // Zu 10% der Dauer oder 1s springen
+      video.currentTime = Math.min(1, video.duration * 0.1);
+    });
+
+    video.addEventListener("seeked", () => {
+      try {
+        const MAX_W = 480;
+        const ratio = video.videoHeight / (video.videoWidth || 1);
+        const w = MAX_W;
+        const h = Math.round(w * ratio) || Math.round(MAX_W * (9 / 16));
+
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          cleanup();
+          resolve(null);
+          return;
+        }
+        ctx.drawImage(video, 0, 0, w, h);
+        canvas.toBlob(
+          (blob) => {
+            cleanup();
+            resolve(blob);
+          },
+          "image/jpeg",
+          0.82
+        );
+      } catch {
+        cleanup();
+        resolve(null);
+      }
+    });
+
+    // Timeout: nach 10s aufgeben
+    setTimeout(() => {
+      cleanup();
+      resolve(null);
+    }, 10000);
+  });
+}
+
 /** Upload mit echtem XHR-Fortschritt (0–90% = Dateiübertragung, 90–100% = DB) */
 function uploadWithProgress(
   file: File,
@@ -171,7 +243,34 @@ export default function AdminUploadPage() {
           }
         }
 
-        // 3. DB-Eintrag erstellen (90–100%)
+        // 3. Video-Thumbnail generieren und hochladen (nur für Videos)
+        let videoThumbnailUrl: string | null = uploadData.thumbnailUrl || null;
+        if (isVideo && !videoThumbnailUrl) {
+          try {
+            const thumbBlob = await generateVideoThumbnail(uploadFile.file);
+            if (thumbBlob) {
+              const thumbFileName = uploadData.fileName.replace(/\.[^/.]+$/, "_thumb.jpg");
+              const thumbFd = new FormData();
+              thumbFd.append("file", thumbBlob, thumbFileName);
+              thumbFd.append("target", "videoThumbnails");
+              if (albumSlug) thumbFd.append("albumSlug", albumSlug);
+
+              const thumbRes = await fetch("/api/upload", {
+                method: "POST",
+                body: thumbFd,
+              });
+              if (thumbRes.ok) {
+                const thumbData = await thumbRes.json();
+                videoThumbnailUrl = thumbData.fileUrl ?? null;
+              }
+            }
+          } catch {
+            // Thumbnail-Fehler nicht kritisch – Video wird trotzdem gespeichert
+            console.warn("Video-Thumbnail konnte nicht generiert werden:", uploadFile.file.name);
+          }
+        }
+
+        // 4. DB-Eintrag erstellen (90–100%)
         setFiles((prev) =>
           prev.map((f) => (f.id === uploadFile.id ? { ...f, progress: 95 } : f))
         );
@@ -183,7 +282,7 @@ export default function AdminUploadPage() {
         const dbPayload = {
           filename: uploadData.fileName,
           fileUrl: uploadData.fileUrl,
-          thumbnailUrl: uploadData.thumbnailUrl || null,
+          thumbnailUrl: isVideo ? videoThumbnailUrl : (uploadData.thumbnailUrl || null),
           albumId: selectedAlbumId ? parseInt(selectedAlbumId) : null,
           isPrivate,
           title: uploadFile.file.name.replace(/\.[^/.]+$/, ""),

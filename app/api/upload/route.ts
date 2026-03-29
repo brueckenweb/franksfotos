@@ -62,6 +62,7 @@ export async function POST(request: NextRequest) {
     const phpFolderMap: Record<string, string> = {
       photos: "fotos",
       videos: "videos",
+      videoThumbnails: "video-thumbs",
       avatars: "avatars",
     };
     const phpFolder = phpFolderMap[targetKey] ?? targetKey;

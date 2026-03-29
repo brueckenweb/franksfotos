@@ -72,6 +72,16 @@ export const UPLOAD_CONFIG: UploadConfig = {
       requiresPermission: "upload_videos",
     },
 
+    // Video-Thumbnails (client-seitig generiert, als JPEG hochgeladen)
+    videoThumbnails: {
+      remote: `${BASE_URL}/video-thumbs/`,
+      maxSize: 5 * 1024 * 1024, // 5MB
+      allowedTypes: ["image/jpeg", "image/png", "image/webp"],
+      allowedExtensions: [".jpg", ".jpeg", ".png", ".webp"],
+      requiresAuth: true,
+      requiresPermission: "upload_videos",
+    },
+
     // Avatare
     avatars: {
       remote: `${BASE_URL}/avatars/`,
