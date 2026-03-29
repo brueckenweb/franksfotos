@@ -261,53 +261,54 @@ jobs:
           if [ -n "$PICS_WEBROOT" ]; then
             echo "✓ Verwende PICS_DEPLOY_PATH Secret: $PICS_WEBROOT"
           else
-            # Strategie 2: Apache-Konfiguration nach pics.frank-sellke.de durchsuchen
-            echo "Suche pics.frank-sellke.de in Apache-Konfiguration..."
+            # Strategie 2: Breite Suche in ALLEN Apache/Nginx/KeyHelp-Configs
+            echo "Suche pics.frank-sellke.de in allen Configs..."
             PICS_WEBROOT=$(ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key \
               ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
                 grep -r "pics\.frank-sellke\.de" \
-                  /etc/apache2/sites-enabled/ \
-                  /etc/apache2/vhosts.d/ \
-                  /etc/apache2/conf.d/ \
-                  /etc/httpd/conf.d/ \
-                  /etc/httpd/vhosts.d/ \
-                  /usr/local/etc/apache24/Includes/ \
+                  /etc/apache2/ /etc/nginx/ /home/keyhelp/ \
                   2>/dev/null | \
-                grep -i "DocumentRoot\|document_root\|VirtualHost\|ServerName" | \
-                grep -i "DocumentRoot" | \
+                grep -i "DocumentRoot\|document_root\|root " | \
                 head -1 | \
-                sed "s/.*DocumentRoot[[:space:]]*//" | \
-                tr -d "\"'"'"'" | \
+                sed "s/.*[Rr]oot[[:space:]]*//" | \
+                tr -d "\"'"'"';" | \
                 awk "{print \$1}"
               ')
-            echo "Aus Apache-Config: '$PICS_WEBROOT'"
+            echo "Aus Config-Suche: '$PICS_WEBROOT'"
 
-            # Strategie 3: Hosting-Panel-Konfiguration lesen (keyhelp/ispconfig)
+            # Strategie 3: upload.php innerhalb frank-sellke und sites suchen
             if [ -z "$PICS_WEBROOT" ]; then
-              echo "Suche im Hosting-Panel..."
-              PICS_WEBROOT=$(ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key \
-                ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
-                  # KeyHelp vhost-Konfiguration
-                  grep -r "pics\.frank-sellke\.de" /etc/apache2/ /etc/nginx/ 2>/dev/null | \
-                  grep -i "root\|docroot" | head -1 | \
-                  sed "s/.*root[[:space:]]*//" | tr -d "\";" | awk "{print \$1}"
-                ')
-              echo "Aus Hosting-Config: '$PICS_WEBROOT'"
+              echo "Suche upload.php in frank-sellke/ und sites/ Verzeichnissen..."
+              FOUND=$(ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key \
+                ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} \
+                'find ~/www/frank-sellke ~/www/sites -name "upload.php" 2>/dev/null | head -5')
+              echo "Gefunden: $FOUND"
+              if [ -n "$FOUND" ]; then
+                PICS_WEBROOT=$(echo "$FOUND" | head -1 | xargs dirname)
+                echo "✓ Webroot gefunden: $PICS_WEBROOT"
+              fi
             fi
 
-            # Strategie 4: Im User-Verzeichnis suchen
+            # Strategie 4: Diagnose-Ausgabe
             if [ -z "$PICS_WEBROOT" ]; then
-              echo "Zeige alle www-Verzeichnisse des Users für manuelle Diagnose..."
+              echo "=== DIAGNOSE ==="
               ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key \
                 ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
-                  echo "=== Inhalt von ~/www/ ==="
-                  ls -la ~/www/ 2>/dev/null || ls -la /home/users/$USER/www/ 2>/dev/null || echo "(nicht zugänglich)"
+                  echo "--- Inhalt ~/www/ ---"
+                  ls ~/www/
                   echo ""
-                  echo "=== Suche nach pics-Verzeichnissen ==="
-                  find ~ -maxdepth 5 -type d \( -name "pics" -o -name "pics.frank-sellke.de" -o -name "pictures" \) 2>/dev/null
+                  echo "--- Inhalt ~/www/frank-sellke/ ---"
+                  ls ~/www/frank-sellke/ 2>/dev/null || echo "(leer oder nicht zugänglich)"
                   echo ""
-                  echo "=== Apache vhosts (pics) ==="
-                  grep -r "pics" /etc/apache2/sites-enabled/ 2>/dev/null | grep -i "ServerName\|DocumentRoot" | head -20 || echo "(keine Treffer)"
+                  echo "--- Inhalt ~/www/sites/ ---"
+                  ls ~/www/sites/ 2>/dev/null || echo "(leer oder nicht zugänglich)"
+                  echo ""
+                  echo "--- KeyHelp domain-config für pics.frank-sellke.de ---"
+                  find /home/keyhelp /etc/keyhelp /var/keyhelp -name "*.conf" 2>/dev/null | \
+                    xargs grep -l "pics.frank-sellke.de" 2>/dev/null | head -3
+                  echo ""
+                  echo "--- Alle Configs mit pics.frank-sellke.de ---"
+                  grep -r "pics.frank-sellke.de" / --include="*.conf" 2>/dev/null | head -10
                 '
             fi
           fi
