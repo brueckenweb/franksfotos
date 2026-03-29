@@ -71,34 +71,15 @@ export default function VideoCard({
   const [playError, setPlayError] = useState(false);
   /** true solange Video initial lädt oder puffert */
   const [isLoading, setIsLoading] = useState(false);
-  /**
-   * Echte Videodimensionen aus dem Browser (onLoadedMetadata im Modal).
-   * Überschreibt DB-Werte für korrekte Darstellung auch bei älteren Videos.
-   */
-  const [runtimeDim, setRuntimeDim] = useState<{ w: number; h: number } | null>(null);
-  /**
-   * Dimensionen des Thumbnail-Bildes (onLoad der <img>).
-   * Wird für das korrekte Seitenverhältnis der Vorschau-Kachel verwendet.
-   */
-  const [thumbDim, setThumbDim] = useState<{ w: number; h: number } | null>(null);
-
-  // Effektive Dimensionen für Modal: Browser-Laufzeit > DB-Werte > Fallback
-  const effW = runtimeDim?.w ?? width ?? null;
-  const effH = runtimeDim?.h ?? height ?? null;
-
-  // Effektive Dimensionen für Kachel: Thumbnail-Bild > DB-Werte > Fallback 16/9
-  const cardW = thumbDim?.w ?? width ?? null;
-  const cardH = thumbDim?.h ?? height ?? null;
 
   // Nur fürs Format-Badge auf der Kachel
   const effectiveMimeType = mimeType || getVideoMimeType(fileUrl);
 
-  // Fehler-, Lade- und Runtime-State zurücksetzen wenn Modal neu geöffnet wird
+  // Fehler- und Lade-State zurücksetzen wenn Modal neu geöffnet wird
   useEffect(() => {
     if (open) {
       setPlayError(false);
-      setIsLoading(true);
-      setRuntimeDim(null);
+      setIsLoading(true); // Video muss immer erst laden
     }
   }, [open]);
 
@@ -123,23 +104,13 @@ export default function VideoCard({
         className="group relative bg-gray-900 border border-gray-800 rounded-xl overflow-hidden hover:border-blue-500/40 transition-colors cursor-pointer"
         onClick={() => setOpen(true)}
       >
-        <div
-          className="bg-gray-800 relative overflow-hidden"
-          style={{ aspectRatio: (cardW && cardH) ? `${cardW}/${cardH}` : "16/9" }}
-        >
+        <div className="aspect-video bg-gray-800 relative overflow-hidden">
           {thumbnailUrl ? (
             <img
               src={thumbnailUrl}
               alt={title || filename}
               className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
               loading="lazy"
-              onLoad={(e) => {
-                // Natürliche Bildgröße des Thumbnails → für korrektes Kachel-Format
-                const img = e.currentTarget;
-                if (img.naturalWidth > 0 && img.naturalHeight > 0) {
-                  setThumbDim({ w: img.naturalWidth, h: img.naturalHeight });
-                }
-              }}
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center">
@@ -204,22 +175,12 @@ export default function VideoCard({
               <div className="flex flex-col gap-3 bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-4">
                 <div className="flex items-start gap-2 text-sm text-red-300">
                   <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                  <div className="flex flex-col gap-1">
-                    <span>
-                      Das Video konnte nicht abgespielt werden.
-                    </span>
-                    {(effectiveMimeType === "video/quicktime" || effectiveMimeType === "video/x-msvideo" || effectiveMimeType === "video/x-matroska") ? (
-                      <span className="text-red-400/80 text-xs">
-                        Das Format <strong>{formatLabel(effectiveMimeType)}</strong> wird von Chrome/Firefox nicht unterstützt.
-                        Bitte lade die Datei herunter oder öffne sie in Safari.
-                      </span>
-                    ) : (
-                      <span className="text-red-400/80 text-xs">
-                        Möglicherweise verwendet das Video den HEVC/H.265-Codec, der in Chrome ohne
-                        Hardware-Unterstützung nicht läuft. Bitte lade die Datei herunter oder nutze Safari.
-                      </span>
-                    )}
-                  </div>
+                  <span>
+                    Das Video konnte nicht abgespielt werden. Das Format{" "}
+                    <strong>{formatLabel(effectiveMimeType)}</strong> wird von
+                    deinem Browser möglicherweise nicht unterstützt, oder die
+                    Datei ist nicht erreichbar.
+                  </span>
                 </div>
                 <a
                   href={`/api/video-download?url=${encodeURIComponent(fileUrl)}&filename=${encodeURIComponent(filename)}`}
@@ -239,18 +200,12 @@ export default function VideoCard({
               korrekte Range-Request-Unterstützung für Seeking.
             */}
             <div
-              className="relative mx-auto w-full"
-              style={{
-                // effW/effH: zunächst DB-Werte, werden nach loadedmetadata durch
-                // echte Browser-Dimensionen überschrieben → immer korrektes Format
-                aspectRatio: (effW && effH) ? `${effW}/${effH}` : "16/9",
-                maxHeight: "80vh",
-                // Breite automatisch aus Seitenverhältnis × maxHeight begrenzen,
-                // damit das Video nie breiter als der Viewport wird.
-                maxWidth: (effW && effH)
-                  ? `calc(80vh * ${effW} / ${effH})`
-                  : "calc(80vh * 16 / 9)",
-              }}
+              className="relative"
+              style={
+                width && height
+                  ? { aspectRatio: `${width}/${height}`, maxHeight: "80vh" }
+                  : undefined
+              }
             >
               {/* Lade-Overlay: sichtbar solange Video noch nicht bereit ist */}
               {isLoading && !playError && (
@@ -266,14 +221,8 @@ export default function VideoCard({
                 autoPlay
                 playsInline
                 className="w-full h-full rounded-xl shadow-2xl bg-black"
+                style={!(width && height) ? { maxHeight: "80vh" } : undefined}
                 onLoadStart={() => setIsLoading(true)}
-                onLoadedMetadata={(e) => {
-                  // Browser hat Video-Header gelesen → echte Dimensionen verfügbar
-                  const v = e.currentTarget;
-                  if (v.videoWidth > 0 && v.videoHeight > 0) {
-                    setRuntimeDim({ w: v.videoWidth, h: v.videoHeight });
-                  }
-                }}
                 onCanPlay={() => setIsLoading(false)}
                 onPlaying={() => setIsLoading(false)}
                 onWaiting={() => setIsLoading(true)}
