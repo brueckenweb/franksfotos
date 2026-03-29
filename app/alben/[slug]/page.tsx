@@ -448,6 +448,7 @@ async function getAlbumVideos(albumId: number) {
         fileUrl: videos.fileUrl,
         thumbnailUrl: videos.thumbnailUrl,
         duration: videos.duration,
+        mimeType: videos.mimeType,
         isPrivate: videos.isPrivate,
       })
       .from(videos)
@@ -651,6 +652,7 @@ export default async function AlbumPage({ params }: Props) {
                   fileUrl={video.fileUrl}
                   thumbnailUrl={video.thumbnailUrl ?? null}
                   duration={video.duration ?? null}
+                  mimeType={video.mimeType ?? null}
                 />
               ))}
             </div>

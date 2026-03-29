@@ -22,11 +22,23 @@ interface Album {
   parentId: number | null;
 }
 
+interface VideoMetadata {
+  /** Dauer in Sekunden (gerundet) */
+  duration: number | null;
+  /** Originalbreite in Pixeln */
+  width: number | null;
+  /** Originalhöhe in Pixeln */
+  height: number | null;
+  /** Thumbnail-Blob (JPEG) */
+  thumbnailBlob: Blob | null;
+}
+
 /**
- * Extrahiert einen Frame aus einem Video als JPEG-Blob (Client-Side, Canvas).
- * Gibt null zurück wenn das Video nicht geladen werden kann.
+ * Extrahiert Video-Metadaten (Dauer, Dimensionen) und einen Thumbnail-Frame
+ * vollständig client-seitig über das HTMLVideoElement.
+ * Gibt null-Werte zurück wenn das Video nicht geladen werden kann.
  */
-function generateVideoThumbnail(videoFile: File): Promise<Blob | null> {
+function extractVideoMetadata(videoFile: File): Promise<VideoMetadata> {
   return new Promise((resolve) => {
     const video = document.createElement("video");
     video.preload = "metadata";
@@ -36,29 +48,33 @@ function generateVideoThumbnail(videoFile: File): Promise<Blob | null> {
     const url = URL.createObjectURL(videoFile);
     video.src = url;
 
-    let resolved = false;
-    const cleanup = () => {
-      if (!resolved) {
-        resolved = true;
+    let settled = false;
+    const finish = (result: VideoMetadata) => {
+      if (!settled) {
+        settled = true;
         URL.revokeObjectURL(url);
+        resolve(result);
       }
     };
 
-    // Auf Fehler → null zurückgeben
-    video.addEventListener("error", () => {
-      cleanup();
-      resolve(null);
-    });
+    const empty: VideoMetadata = { duration: null, width: null, height: null, thumbnailBlob: null };
+
+    // Auf Fehler → leere Metadaten zurückgeben
+    video.addEventListener("error", () => finish(empty));
 
     video.addEventListener("loadedmetadata", () => {
-      // Zu 10% der Dauer oder 1s springen
-      video.currentTime = Math.min(1, video.duration * 0.1);
+      // Zu 10 % der Dauer oder max. 1s springen für den Thumbnail
+      video.currentTime = Math.min(1, (video.duration || 0) * 0.1);
     });
 
     video.addEventListener("seeked", () => {
+      const dur = isFinite(video.duration) ? Math.round(video.duration) : null;
+      const origW = video.videoWidth || null;
+      const origH = video.videoHeight || null;
+
       try {
         const MAX_W = 480;
-        const ratio = video.videoHeight / (video.videoWidth || 1);
+        const ratio = (origH ?? 0) / (origW || 1);
         const w = MAX_W;
         const h = Math.round(w * ratio) || Math.round(MAX_W * (9 / 16));
 
@@ -67,30 +83,22 @@ function generateVideoThumbnail(videoFile: File): Promise<Blob | null> {
         canvas.height = h;
         const ctx = canvas.getContext("2d");
         if (!ctx) {
-          cleanup();
-          resolve(null);
+          finish({ duration: dur, width: origW, height: origH, thumbnailBlob: null });
           return;
         }
         ctx.drawImage(video, 0, 0, w, h);
         canvas.toBlob(
-          (blob) => {
-            cleanup();
-            resolve(blob);
-          },
+          (blob) => finish({ duration: dur, width: origW, height: origH, thumbnailBlob: blob }),
           "image/jpeg",
           0.82
         );
       } catch {
-        cleanup();
-        resolve(null);
+        finish({ duration: dur, width: origW, height: origH, thumbnailBlob: null });
       }
     });
 
     // Timeout: nach 10s aufgeben
-    setTimeout(() => {
-      cleanup();
-      resolve(null);
-    }, 10000);
+    setTimeout(() => finish(empty), 10000);
   });
 }
 
@@ -243,15 +251,24 @@ export default function AdminUploadPage() {
           }
         }
 
-        // 3. Video-Thumbnail generieren und hochladen (nur für Videos)
+        // 3. Video-Metadaten (duration, width, height) + Thumbnail extrahieren
         let videoThumbnailUrl: string | null = uploadData.thumbnailUrl || null;
-        if (isVideo && !videoThumbnailUrl) {
+        let videoDuration: number | null = null;
+        let videoWidth: number | null = null;
+        let videoHeight: number | null = null;
+
+        if (isVideo) {
           try {
-            const thumbBlob = await generateVideoThumbnail(uploadFile.file);
-            if (thumbBlob) {
+            const meta = await extractVideoMetadata(uploadFile.file);
+            videoDuration = meta.duration;
+            videoWidth    = meta.width;
+            videoHeight   = meta.height;
+
+            // Thumbnail hochladen, falls noch nicht vorhanden
+            if (!videoThumbnailUrl && meta.thumbnailBlob) {
               const thumbFileName = uploadData.fileName.replace(/\.[^/.]+$/, "_thumb.jpg");
               const thumbFd = new FormData();
-              thumbFd.append("file", thumbBlob, thumbFileName);
+              thumbFd.append("file", meta.thumbnailBlob, thumbFileName);
               thumbFd.append("target", "videoThumbnails");
               if (albumSlug) thumbFd.append("albumSlug", albumSlug);
 
@@ -265,8 +282,8 @@ export default function AdminUploadPage() {
               }
             }
           } catch {
-            // Thumbnail-Fehler nicht kritisch – Video wird trotzdem gespeichert
-            console.warn("Video-Thumbnail konnte nicht generiert werden:", uploadFile.file.name);
+            // Metadaten-Fehler sind nicht kritisch – Video wird trotzdem gespeichert
+            console.warn("Video-Metadaten konnten nicht extrahiert werden:", uploadFile.file.name);
           }
         }
 
@@ -289,6 +306,14 @@ export default function AdminUploadPage() {
           description: description.trim() || null,
           exifData: exifData ?? null,
           bnummer,
+          // Video-spezifische Metadaten
+          ...(isVideo ? {
+            mimeType:  uploadFile.file.type || null,
+            fileSize:  uploadFile.file.size,
+            duration:  videoDuration,
+            width:     videoWidth,
+            height:    videoHeight,
+          } : {}),
         };
 
         const dbRes = await fetch(`/api/${isVideo ? "videos" : "photos"}`, {

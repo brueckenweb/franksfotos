@@ -1,42 +1,166 @@
 /**
- * Testet ob der API-Key vom PHP-Upload-Server akzeptiert wird.
- * Sendet eine minimale Anfrage ohne echte Datei (nur apiKey + path).
+ * Testet den PHP-Upload-Server auf pics.frank-sellke.de
+ * Test 1: API-Key (ohne Datei)
+ * Test 2: Raw-Body-Upload mit einer kleinen Test-JPEG
+ * Test 3: Raw-Body-Upload mit einem minimalen MP4 (ftyp-Box)
  * Ausführen: node scripts/test-upload-key.mjs
  */
 
-const API_KEY = "eb79f197cb6766d3a889e69ccf5eea0ecfe550ce3d61b043e2e2d9777d62d2a9";
-const PHP_ENDPOINT = "https://pics.frank-sellke.de/upload.php";
+const API_KEY  = "eb79f197cb6766d3a889e69ccf5eea0ecfe550ce3d61b043e2e2d9777d62d2a9";
+const ENDPOINT = "https://pics.frank-sellke.de/upload.php";
 
-console.log("🔑 Teste API-Key:", API_KEY.substring(0, 12) + "...");
-console.log("🌐 Endpoint:", PHP_ENDPOINT);
+console.log("🔑 API-Key:", API_KEY.substring(0, 12) + "...");
+console.log("🌐 Endpoint:", ENDPOINT);
 console.log("");
 
-// Test 1: Nur apiKey + path senden (kein file) → Erwartung: "Keine Datei" oder "Ungültiger API-Key"
-const formData = new FormData();
-formData.append("apiKey", API_KEY);
-formData.append("path", "fotos");
+// ─── Test 1: Key ohne Datei ─────────────────────────────────────────────
+console.log("▶ Test 1: API-Key-Check (multipart, ohne Datei)");
+{
+  const fd = new FormData();
+  fd.append("apiKey", API_KEY);
+  fd.append("path", "fotos");
 
-try {
-  const res = await fetch(PHP_ENDPOINT, {
+  const res = await fetch(ENDPOINT, { method: "POST", body: fd });
+  const text = await res.text();
+  console.log("  HTTP:", res.status, res.statusText);
+  console.log("  Body:", text.substring(0, 200));
+  let ok = false;
+  try {
+    const j = JSON.parse(text);
+    ok = j?.error === "Keine Datei übermittelt"
+      || j?.error === "Keine Datei übermittelt (post_max_size überschritten?)";
+  } catch {}
+  console.log(ok ? "  ✅ API-Key OK" : "  ❌ Problem mit API-Key");
+  console.log("");
+}
+
+// ─── Test 2: Minimales JPEG als Raw-Body ───────────────────────────────
+console.log("▶ Test 2: Raw-Body-Upload (kleinstes gültiges JPEG, 1x1 px)");
+{
+  // Minimales 1x1 JPEG (331 Bytes)
+  const minimalJpeg = new Uint8Array([
+    0xFF,0xD8,0xFF,0xE0,0x00,0x10,0x4A,0x46,0x49,0x46,0x00,0x01,
+    0x01,0x00,0x00,0x01,0x00,0x01,0x00,0x00,0xFF,0xDB,0x00,0x43,
+    0x00,0x08,0x06,0x06,0x07,0x06,0x05,0x08,0x07,0x07,0x07,0x09,
+    0x09,0x08,0x0A,0x0C,0x14,0x0D,0x0C,0x0B,0x0B,0x0C,0x19,0x12,
+    0x13,0x0F,0x14,0x1D,0x1A,0x1F,0x1E,0x1D,0x1A,0x1C,0x1C,0x20,
+    0x24,0x2E,0x27,0x20,0x22,0x2C,0x23,0x1C,0x1C,0x28,0x37,0x29,
+    0x2C,0x30,0x31,0x34,0x34,0x34,0x1F,0x27,0x39,0x3D,0x38,0x32,
+    0x3C,0x2E,0x33,0x34,0x32,0xFF,0xC0,0x00,0x0B,0x08,0x00,0x01,
+    0x00,0x01,0x01,0x01,0x11,0x00,0xFF,0xC4,0x00,0x1F,0x00,0x00,
+    0x01,0x05,0x01,0x01,0x01,0x01,0x01,0x01,0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00,0x01,0x02,0x03,0x04,0x05,0x06,0x07,0x08,
+    0x09,0x0A,0x0B,0xFF,0xC4,0x00,0xB5,0x10,0x00,0x02,0x01,0x03,
+    0x03,0x02,0x04,0x03,0x05,0x05,0x04,0x04,0x00,0x00,0x01,0x7D,
+    0x01,0x02,0x03,0x00,0x04,0x11,0x05,0x12,0x21,0x31,0x41,0x06,
+    0x13,0x51,0x61,0x07,0x22,0x71,0x14,0x32,0x81,0x91,0xA1,0x08,
+    0x23,0x42,0xB1,0xC1,0x15,0x52,0xD1,0xF0,0x24,0x33,0x62,0x72,
+    0x82,0x09,0x0A,0x16,0x17,0x18,0x19,0x1A,0x25,0x26,0x27,0x28,
+    0x29,0x2A,0x34,0x35,0x36,0x37,0x38,0x39,0x3A,0x43,0x44,0x45,
+    0x46,0x47,0x48,0x49,0x4A,0x53,0x54,0x55,0x56,0x57,0x58,0x59,
+    0x5A,0x63,0x64,0x65,0x66,0x67,0x68,0x69,0x6A,0x73,0x74,0x75,
+    0x76,0x77,0x78,0x79,0x7A,0x83,0x84,0x85,0x86,0x87,0x88,0x89,
+    0x8A,0x93,0x94,0x95,0x96,0x97,0x98,0x99,0x9A,0xA2,0xA3,0xA4,
+    0xA5,0xA6,0xA7,0xA8,0xA9,0xAA,0xB2,0xB3,0xB4,0xB5,0xB6,0xB7,
+    0xB8,0xB9,0xBA,0xC2,0xC3,0xC4,0xC5,0xC6,0xC7,0xC8,0xC9,0xCA,
+    0xD2,0xD3,0xD4,0xD5,0xD6,0xD7,0xD8,0xD9,0xDA,0xE1,0xE2,0xE3,
+    0xE4,0xE5,0xE6,0xE7,0xE8,0xE9,0xEA,0xF1,0xF2,0xF3,0xF4,0xF5,
+    0xF6,0xF7,0xF8,0xF9,0xFA,0xFF,0xDA,0x00,0x08,0x01,0x01,0x00,
+    0x00,0x3F,0x00,0xFB,0xD5,0xFF,0xD9,
+  ]);
+
+  const testFileName = `test_${Date.now()}.jpg`;
+
+  const res = await fetch(ENDPOINT, {
     method: "POST",
-    body: formData,
+    headers: {
+      "X-API-Key":      API_KEY,
+      "X-Upload-Path":  "fotos",
+      "X-Upload-Name":  testFileName,
+      "Content-Type":   "image/jpeg",
+      "Content-Length": String(minimalJpeg.byteLength),
+    },
+    body: minimalJpeg,
   });
 
   const text = await res.text();
-  console.log("HTTP Status:", res.status);
-  console.log("Antwort:", text);
+  console.log("  HTTP:", res.status, res.statusText);
+  console.log("  Body:", text.substring(0, 500));
 
   let json;
   try { json = JSON.parse(text); } catch { json = null; }
 
-  if (json?.error === "Ungültiger API-Key") {
-    console.log("\n❌ API-Key wird ABGELEHNT – PHP-Datei auf Server hat anderen Key!");
-    console.log("   → Bitte upload.php neu auf pics.frank-sellke.de hochladen.");
-  } else if (json?.error === "Keine Datei übermittelt") {
-    console.log("\n✅ API-Key wird AKZEPTIERT! Upload-Endpoint funktioniert korrekt.");
+  if (json?.success) {
+    console.log("  ✅ JPEG Raw-Body-Upload FUNKTIONIERT! URL:", json.fileUrl);
+  } else if (json?.error) {
+    console.log("  ❌ PHP-Fehler:", json.error);
   } else {
-    console.log("\n⚠️  Unerwartete Antwort – prüfe den Server.");
+    console.log("  ⚠️  Unerwartete Antwort (HTML? Leerer Body?)");
   }
-} catch (err) {
-  console.error("❌ Verbindungsfehler:", err.message);
+  console.log("");
 }
+
+// ─── Test 3: Minimales MP4 als Raw-Body ───────────────────────────────
+console.log("▶ Test 3: Raw-Body-Upload (minimales MP4, ftyp-Box + leerer mdat)");
+{
+  // Minimales gültiges MP4: ftyp-Box (isom) + leere mdat-Box
+  // ftyp box: 20 Bytes (size=20, type="ftyp", brand="isom", minor=0, compat="isom")
+  // free box:  8 Bytes (size=8, type="free")
+  // mdat box:  8 Bytes (size=8, type="mdat")
+  const minimalMp4 = new Uint8Array([
+    // ftyp box (20 Bytes)
+    0x00, 0x00, 0x00, 0x14,                   // size = 20
+    0x66, 0x74, 0x79, 0x70,                   // "ftyp"
+    0x69, 0x73, 0x6F, 0x6D,                   // brand = "isom"
+    0x00, 0x00, 0x02, 0x00,                   // minor version
+    0x69, 0x73, 0x6F, 0x6D,                   // compat brand "isom"
+    // free box (8 Bytes)
+    0x00, 0x00, 0x00, 0x08,                   // size = 8
+    0x66, 0x72, 0x65, 0x65,                   // "free"
+    // mdat box (8 Bytes, leer)
+    0x00, 0x00, 0x00, 0x08,                   // size = 8
+    0x6D, 0x64, 0x61, 0x74,                   // "mdat"
+  ]);
+
+  const testFileName = `test_${Date.now()}.mp4`;
+
+  const res = await fetch(ENDPOINT, {
+    method: "POST",
+    headers: {
+      "X-API-Key":      API_KEY,
+      "X-Upload-Path":  "videos",
+      "X-Upload-Name":  testFileName,
+      "Content-Type":   "video/mp4",
+      "Content-Length": String(minimalMp4.byteLength),
+    },
+    body: minimalMp4,
+  });
+
+  const text = await res.text();
+  console.log("  HTTP:", res.status, res.statusText);
+  console.log("  Body:", text.substring(0, 500));
+
+  let json;
+  try { json = JSON.parse(text); } catch { json = null; }
+
+  if (json?.success) {
+    console.log("  ✅ MP4 Raw-Body-Upload FUNKTIONIERT! URL:", json.fileUrl);
+  } else if (json?.error) {
+    console.log("  ❌ PHP-Fehler:", json.error);
+    if (json.error.includes("MIME")) {
+      console.log("  → finfo erkennt die Datei als anderen MIME-Type.");
+      console.log("  → Lösung: erlaubte MIME-Types in upload.php erweitern.");
+    } else if (json.error.includes("Verzeichnis")) {
+      console.log("  → 'videos'-Ordner konnte nicht angelegt werden.");
+      console.log("  → Lösung: Ordner manuell anlegen und chmod 755 setzen.");
+    } else if (json.error.includes("Dateiinhalt")) {
+      console.log("  → php://input ist leer.");
+    }
+  } else {
+    console.log("  ⚠️  Unerwartete Antwort (HTTP 500 / leerer Body / HTML-Fehlerseite)");
+    console.log("  → Möglicherweise PHP-Syntaxfehler, Apache-Fehler, oder Timeout");
+  }
+  console.log("");
+}
+
+console.log("─── Tests abgeschlossen ───");

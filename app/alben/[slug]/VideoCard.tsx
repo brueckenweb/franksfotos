@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Play, X } from "lucide-react";
+import { Play, X, Download, AlertTriangle } from "lucide-react";
 
 interface VideoCardProps {
   filename: string;
@@ -10,6 +10,8 @@ interface VideoCardProps {
   fileUrl: string;
   thumbnailUrl: string | null;
   duration?: number | null;
+  /** MIME-Typ aus der Datenbank (bevorzugt gegenüber URL-Ableitung) */
+  mimeType?: string | null;
 }
 
 function formatDuration(seconds: number): string {
@@ -18,18 +20,52 @@ function formatDuration(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
-/** MIME-Typ aus Dateiendung ableiten */
+/**
+ * MIME-Typ aus Dateiendung ableiten – Fallback wenn kein mimeType aus DB vorhanden.
+ * Ignoriert Query-Parameter (?foo=bar) korrekt.
+ */
 function getVideoMimeType(url: string): string {
-  const ext = url.split(".").pop()?.toLowerCase() ?? "";
+  const path = url.split("?")[0];
+  const ext = path.split(".").pop()?.toLowerCase() ?? "";
   const map: Record<string, string> = {
-    mp4: "video/mp4",
-    m4v: "video/mp4",
-    mov: "video/quicktime",
+    mp4:  "video/mp4",
+    m4v:  "video/mp4",
+    mov:  "video/quicktime",
     webm: "video/webm",
-    avi: "video/x-msvideo",
-    mkv: "video/x-matroska",
+    avi:  "video/x-msvideo",
+    mkv:  "video/x-matroska",
   };
   return map[ext] || "video/mp4";
+}
+
+/**
+ * Gibt alle Source-Einträge zurück.
+ * Für MOV/QuickTime wird auch video/mp4 probiert, da viele .mov-Dateien
+ * H.264-codiert sind und Chrome diese als video/mp4 abspielen kann.
+ */
+function getVideoSources(
+  fileUrl: string,
+  mimeType: string | null | undefined
+): Array<{ type: string }> {
+  const primary = mimeType || getVideoMimeType(fileUrl);
+  const sources: Array<{ type: string }> = [{ type: primary }];
+  if (primary === "video/quicktime") {
+    sources.push({ type: "video/mp4" });
+  }
+  return sources;
+}
+
+/** Gibt eine lesbare Format-Bezeichnung zurück */
+function formatLabel(mimeType: string): string {
+  const ext = mimeType.split("/")[1] ?? mimeType;
+  const map: Record<string, string> = {
+    "quicktime":   "QuickTime/MOV",
+    "x-msvideo":   "AVI",
+    "x-matroska":  "MKV",
+    "mp4":         "MP4",
+    "webm":        "WebM",
+  };
+  return map[ext] ?? ext.toUpperCase();
 }
 
 export default function VideoCard({
@@ -39,8 +75,19 @@ export default function VideoCard({
   fileUrl,
   thumbnailUrl,
   duration,
+  mimeType,
 }: VideoCardProps) {
   const [open, setOpen] = useState(false);
+  /** Nur true wenn der Browser einen echten Wiedergabefehler meldet */
+  const [playError, setPlayError] = useState(false);
+
+  const effectiveMimeType = mimeType || getVideoMimeType(fileUrl);
+  const sources = getVideoSources(fileUrl, mimeType);
+
+  // Fehler-State zurücksetzen wenn Modal neu geöffnet wird
+  useEffect(() => {
+    if (open) setPlayError(false);
+  }, [open]);
 
   // Escape-Taste schließt Modal
   useEffect(() => {
@@ -49,7 +96,6 @@ export default function VideoCard({
       if (e.key === "Escape") setOpen(false);
     };
     window.addEventListener("keydown", handleKey);
-    // Body-Scroll deaktivieren
     document.body.style.overflow = "hidden";
     return () => {
       window.removeEventListener("keydown", handleKey);
@@ -91,6 +137,13 @@ export default function VideoCard({
               {formatDuration(duration)}
             </div>
           )}
+
+          {/* Format-Badge bei nicht-MP4 */}
+          {effectiveMimeType !== "video/mp4" && (
+            <div className="absolute top-2 left-2 bg-black/70 rounded px-1.5 py-0.5 text-xs text-gray-300 font-mono">
+              {formatLabel(effectiveMimeType)}
+            </div>
+          )}
         </div>
 
         <div className="p-3">
@@ -123,14 +176,40 @@ export default function VideoCard({
             className="w-full max-w-5xl flex flex-col gap-3"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* Fehlermeldung – nur bei echtem Abspiel-Fehler (onError) */}
+            {playError && (
+              <div className="flex flex-col gap-3 bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-4">
+                <div className="flex items-start gap-2 text-sm text-red-300">
+                  <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <span>
+                    Das Video konnte nicht abgespielt werden. Das Format{" "}
+                    <strong>{formatLabel(effectiveMimeType)}</strong> wird von
+                    deinem Browser möglicherweise nicht unterstützt, oder die
+                    Datei ist beschädigt.
+                  </span>
+                </div>
+                <a
+                  href={`/api/video-download?url=${encodeURIComponent(fileUrl)}&filename=${encodeURIComponent(filename)}`}
+                  download={filename}
+                  className="inline-flex items-center gap-2 self-start bg-white/10 hover:bg-white/20 text-white text-sm px-3 py-2 rounded-lg transition-colors"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <Download className="w-4 h-4" />
+                  Datei herunterladen
+                </a>
+              </div>
+            )}
+
             <video
               controls
               autoPlay
               className="w-full rounded-xl shadow-2xl bg-black"
               style={{ maxHeight: "80vh" }}
+              onError={() => setPlayError(true)}
             >
-              <source src={fileUrl} type={getVideoMimeType(fileUrl)} />
-              Ihr Browser unterstützt dieses Videoformat nicht.
+              {sources.map((s) => (
+                <source key={s.type} src={fileUrl} type={s.type} />
+              ))}
             </video>
 
             {(title || filename) && (
