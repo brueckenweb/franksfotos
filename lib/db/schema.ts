@@ -117,7 +117,8 @@ export const albums = mysqlTable("albums", {
   coverPhotoId: int("cover_photo_id"),    // wird nach photos/videos gesetzt
   coverVideoId: int("cover_video_id"),
   sortOrder: int("sort_order").default(0).notNull(),
-  childSortMode: varchar("child_sort_mode", { length: 10 }).default("order").notNull(), // 'order' | 'alpha'
+  childSortMode: varchar("child_sort_mode", { length: 10 }).default("order").notNull(), // 'order' | 'alpha' | 'alpha_desc'
+  photoSortMode: varchar("photo_sort_mode", { length: 20 }).default("created_asc").notNull(), // 'created_asc' | 'created_desc' | 'title_asc' | 'title_desc' | 'filename_asc' | 'manual'
   isActive: boolean("is_active").default(true).notNull(),
   createdBy: int("created_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),

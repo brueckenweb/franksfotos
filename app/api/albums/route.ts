@@ -59,11 +59,14 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, slug, description, parentId, sortOrder, childSortMode, visibleForGroups } = body;
+    const { name, slug, description, parentId, sortOrder, childSortMode, photoSortMode, visibleForGroups } = body;
 
     if (!name || !slug) {
       return NextResponse.json({ error: "Name und Slug sind erforderlich" }, { status: 400 });
     }
+
+    const validPhotoSortModes = ["created_asc", "created_desc", "title_asc", "title_desc", "filename_asc", "manual"];
+    const safePhotoSortMode = validPhotoSortModes.includes(photoSortMode) ? photoSortMode : "created_asc";
 
     const userId = parseInt((session.user as { id: string }).id);
 
@@ -75,7 +78,8 @@ export async function POST(request: NextRequest) {
         description: description || null,
         parentId: parentId || null,
         sortOrder: sortOrder || 0,
-        childSortMode: childSortMode === "alpha" ? "alpha" : "order",
+        childSortMode: ["alpha", "alpha_desc"].includes(childSortMode) ? childSortMode : "order",
+        photoSortMode: safePhotoSortMode,
         isActive: true,
         createdBy: userId,
       })

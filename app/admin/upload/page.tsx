@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import { useSearchParams } from "next/navigation";
 import { Upload, X, CheckCircle2, AlertCircle, Loader2, Image as ImageIcon, Film } from "lucide-react";
 import AlbumTreeSelect from "../alben/AlbumTreeSelect";
 import exifr from "exifr";
@@ -68,9 +69,12 @@ function uploadWithProgress(
 }
 
 export default function AdminUploadPage() {
+  const searchParams = useSearchParams();
+  const initialAlbumId = searchParams.get("albumId") ?? "";
+
   const [files, setFiles] = useState<UploadFile[]>([]);
   const [albums, setAlbums] = useState<Album[]>([]);
-  const [selectedAlbumId, setSelectedAlbumId] = useState<string>("");
+  const [selectedAlbumId, setSelectedAlbumId] = useState<string>(initialAlbumId);
   const [description, setDescription] = useState("");
   const [isPrivate, setIsPrivate] = useState(false);
   const [uploading, setUploading] = useState(false);

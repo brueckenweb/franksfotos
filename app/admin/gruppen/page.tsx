@@ -5,6 +5,8 @@ import { groups, groupPermissions, permissions, userGroups } from "@/lib/db/sche
 import { eq, count } from "drizzle-orm";
 import { Shield } from "lucide-react";
 import GroupPermissionsEditor from "./GroupPermissionsEditor";
+import CreateGroupForm from "./CreateGroupForm";
+import DeleteGroupButton from "./DeleteGroupButton";
 
 async function getGroupsWithDetails() {
   try {
@@ -57,9 +59,12 @@ export default async function AdminGruppenPage() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-white">Gruppen & Rechte</h1>
         <p className="text-gray-400 text-sm mt-0.5">
-          Systemgruppen und ihre Berechtigungen
+          Gruppen verwalten und Berechtigungen zuweisen
         </p>
       </div>
+
+      {/* Neue Gruppe erstellen */}
+      <CreateGroupForm />
 
       <div className="space-y-4">
         {allGroups.map((group) => {
@@ -91,8 +96,13 @@ export default async function AdminGruppenPage() {
                     )}
                   </div>
                 </div>
-                <div className="text-gray-500 text-sm">
-                  {group.memberCount} Mitglied{group.memberCount !== 1 ? "er" : ""}
+                <div className="flex items-center gap-3">
+                  <div className="text-gray-500 text-sm">
+                    {group.memberCount} Mitglied{group.memberCount !== 1 ? "er" : ""}
+                  </div>
+                  {!group.isSystem && (
+                    <DeleteGroupButton groupId={group.id} groupName={group.name} />
+                  )}
                 </div>
               </div>
 

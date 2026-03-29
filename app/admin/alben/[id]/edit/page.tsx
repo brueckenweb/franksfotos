@@ -70,6 +70,7 @@ export default function EditAlbumPage() {
     parentId: "",
     sortOrder: "0",
     childSortMode: "order",
+    photoSortMode: "created_asc",
     isActive: true,
     coverPhotoId: "",
     visibleForPublic: false,
@@ -99,6 +100,7 @@ export default function EditAlbumPage() {
             parentId: albumData.album.parentId ? String(albumData.album.parentId) : "",
             sortOrder: String(albumData.album.sortOrder ?? 0),
             childSortMode: albumData.album.childSortMode ?? "order",
+            photoSortMode: albumData.album.photoSortMode ?? "created_asc",
             isActive: albumData.album.isActive,
             coverPhotoId: albumData.album.coverPhotoId
               ? String(albumData.album.coverPhotoId)
@@ -143,6 +145,7 @@ export default function EditAlbumPage() {
           parentId: form.parentId ? parseInt(form.parentId) : null,
           sortOrder: parseInt(form.sortOrder) || 0,
           childSortMode: form.childSortMode,
+          photoSortMode: form.photoSortMode,
           isActive: form.isActive,
           coverPhotoId: form.coverPhotoId ? parseInt(form.coverPhotoId) : null,
           visibleForGroups,
@@ -322,6 +325,7 @@ export default function EditAlbumPage() {
             {[
               { value: "order", label: "# Manuelle Reihenfolge" },
               { value: "alpha", label: "A–Z Alphabetisch" },
+              { value: "alpha_desc", label: "Z–A Alphabetisch" },
             ].map((opt) => (
               <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
                 <input
@@ -338,6 +342,38 @@ export default function EditAlbumPage() {
           </div>
           <p className="text-gray-500 text-xs mt-1">
             Legt fest, wie direkte Unteralben dieses Albums sortiert werden.
+          </p>
+        </div>
+
+        {/* Sortierung der Fotos */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-2">
+            Sortierung der Fotos
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {[
+              { value: "created_asc", label: "📅 Aufnahmezeit (älteste zuerst)" },
+              { value: "created_desc", label: "📅 Aufnahmezeit (neueste zuerst)" },
+              { value: "title_asc", label: "A–Z Titel" },
+              { value: "title_desc", label: "Z–A Titel" },
+              { value: "filename_asc", label: "A–Z Dateiname" },
+              { value: "manual", label: "# Manuelle Reihenfolge (sortOrder)" },
+            ].map((opt) => (
+              <label key={opt.value} className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="photoSortMode"
+                  value={opt.value}
+                  checked={form.photoSortMode === opt.value}
+                  onChange={(e) => setForm((p) => ({ ...p, photoSortMode: e.target.value }))}
+                  className="w-4 h-4 border-gray-600 bg-gray-800 text-amber-500 focus:ring-amber-500"
+                />
+                <span className="text-gray-300 text-sm">{opt.label}</span>
+              </label>
+            ))}
+          </div>
+          <p className="text-gray-500 text-xs mt-1">
+            Legt fest, in welcher Reihenfolge die Fotos im Album angezeigt werden.
           </p>
         </div>
 

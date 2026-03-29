@@ -19,6 +19,7 @@ import {
   Settings,
   Menu,
   X,
+  Mail,
 } from "lucide-react";
 
 interface AdminNavProps {
@@ -74,6 +75,11 @@ const adminOnlyItems = [
     label: "Gruppen & Rechte",
     href: "/admin/gruppen",
     icon: Shield,
+  },
+  {
+    label: "E-Mail",
+    href: "/admin/email",
+    icon: Mail,
   },
   {
     label: "Einstellungen",

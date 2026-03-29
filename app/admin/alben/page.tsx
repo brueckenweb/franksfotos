@@ -174,7 +174,11 @@ export default async function AdminAlbenPage({
           </Link>
         </div>
       ) : (
-        <AlbumTableClient rootAlbums={rootAlbums} childrenMap={childrenMap} />
+        <AlbumTableClient
+          rootAlbums={rootAlbums}
+          childrenMap={childrenMap}
+          isDragEnabled={!isAlpha}
+        />
       )}
     </div>
   );

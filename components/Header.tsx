@@ -1,9 +1,14 @@
 import Link from "next/link";
 import { Camera, LogIn, Images } from "lucide-react";
 import { auth } from "@/auth";
+import { isAdmin } from "@/lib/auth/permissions";
 
 export default async function Header() {
   const session = await auth();
+
+  const isMainAdmin = !!(session?.user as { isMainAdmin?: boolean })?.isMainAdmin;
+  const userPermissions = (session?.user as { permissions?: string[] })?.permissions ?? [];
+  const showAdminLink = isAdmin(userPermissions, isMainAdmin);
 
   return (
     <header className="border-b border-gray-800 bg-gray-900 sticky top-0 z-10">
@@ -30,12 +35,14 @@ export default async function Header() {
 
             {session?.user ? (
               <>
-                <Link
-                  href="/admin"
-                  className="text-sm text-gray-400 hover:text-white transition-colors px-2 py-1.5 rounded-lg hover:bg-gray-800"
-                >
-                  Admin
-                </Link>
+                {showAdminLink && (
+                  <Link
+                    href="/admin"
+                    className="text-sm text-gray-400 hover:text-white transition-colors px-2 py-1.5 rounded-lg hover:bg-gray-800"
+                  >
+                    Admin
+                  </Link>
+                )}
                 <Link
                   href="/profil"
                   className="text-sm text-gray-400 hover:text-white transition-colors px-2 py-1.5 rounded-lg hover:bg-gray-800 max-w-[80px] sm:max-w-none truncate"

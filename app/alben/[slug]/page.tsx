@@ -8,8 +8,10 @@ import {
   groups,
   photos,
   videos,
+  photoGroupVisibility,
+  photoUserAccess,
 } from "@/lib/db/schema";
-import { eq, and, inArray, count } from "drizzle-orm";
+import { eq, and, inArray, count, or, asc, desc, type SQL } from "drizzle-orm";
 import {
   Camera,
   ArrowLeft,
@@ -83,27 +85,39 @@ async function checkVisibility(albumId: number, userGroups: string[]) {
 async function getAccessibleChildAlbums(
   parentId: number,
   userGroupSlugs: string[],
-  childSortMode: string
+  childSortMode: string,
+  isAdmin = false
 ) {
   try {
-    // Alle zugänglichen Gruppen-IDs ermitteln
-    const userGroups = await db
-      .select({ id: groups.id })
-      .from(groups)
-      .where(inArray(groups.slug, userGroupSlugs));
+    let visibleIds: number[];
 
-    const groupIds = userGroups.map((g) => g.id);
-    if (groupIds.length === 0) return [];
+    if (isAdmin) {
+      // Admin sieht alle aktiven Unteralben
+      const allActive = await db
+        .select({ id: albums.id })
+        .from(albums)
+        .where(and(eq(albums.isActive, true), eq(albums.parentId, parentId)));
+      visibleIds = allActive.map((a) => a.id);
+    } else {
+      // Alle zugänglichen Gruppen-IDs ermitteln
+      const userGroups = await db
+        .select({ id: groups.id })
+        .from(groups)
+        .where(inArray(groups.slug, userGroupSlugs));
 
-    // Sichtbare Album-IDs
-    const visibleEntries = await db
-      .selectDistinct({ albumId: albumVisibility.albumId })
-      .from(albumVisibility)
-      .where(inArray(albumVisibility.groupId, groupIds));
+      const groupIds = userGroups.map((g) => g.id);
+      if (groupIds.length === 0) return [];
 
-    const visibleIds = visibleEntries
-      .map((v) => v.albumId)
-      .filter((id): id is number => id !== null);
+      // Sichtbare Album-IDs
+      const visibleEntries = await db
+        .selectDistinct({ albumId: albumVisibility.albumId })
+        .from(albumVisibility)
+        .where(inArray(albumVisibility.groupId, groupIds));
+
+      visibleIds = visibleEntries
+        .map((v) => v.albumId)
+        .filter((id): id is number => id !== null);
+    }
 
     if (visibleIds.length === 0) return [];
 
@@ -293,6 +307,8 @@ async function getAccessibleChildAlbums(
     return result.sort((a, b) =>
       childSortMode === "alpha"
         ? a.name.localeCompare(b.name, "de")
+        : childSortMode === "alpha_desc"
+        ? b.name.localeCompare(a.name, "de")
         : a.sortOrder !== b.sortOrder
         ? a.sortOrder - b.sortOrder
         : a.name.localeCompare(b.name, "de")
@@ -302,8 +318,92 @@ async function getAccessibleChildAlbums(
   }
 }
 
-async function getAlbumPhotos(albumId: number) {
+/** Baut die ORDER-BY-Ausdrücke für Fotos je nach photoSortMode */
+function buildPhotoOrder(mode: string): SQL[] {
+  switch (mode) {
+    case "created_desc":
+      return [desc(photos.createdAt)];
+    case "title_asc":
+      return [asc(photos.title), asc(photos.filename)];
+    case "title_desc":
+      return [desc(photos.title), asc(photos.filename)];
+    case "filename_asc":
+      return [asc(photos.filename)];
+    case "manual":
+      return [asc(photos.sortOrder), asc(photos.createdAt)];
+    case "created_asc":
+    default:
+      return [asc(photos.createdAt)];
+  }
+}
+
+async function getAlbumPhotos(
+  albumId: number,
+  isAdmin = false,
+  userId: number | null = null,
+  userGroupSlugs: string[] = [],
+  sortMode = "created_asc"
+) {
+  const orderBy = buildPhotoOrder(sortMode);
+
   try {
+    if (isAdmin) {
+      // Admin sieht alle Fotos (öffentlich + privat)
+      return await db
+        .select({
+          id: photos.id,
+          filename: photos.filename,
+          title: photos.title,
+          fileUrl: photos.fileUrl,
+          thumbnailUrl: photos.thumbnailUrl,
+          isPrivate: photos.isPrivate,
+          width: photos.width,
+          height: photos.height,
+        })
+        .from(photos)
+        .where(eq(photos.albumId, albumId))
+        .orderBy(...orderBy);
+    }
+
+    // Gruppen-IDs des Users ermitteln (inkl. "public")
+    let accessiblePrivatePhotoIds: number[] = [];
+
+    if (userGroupSlugs.length > 0) {
+      const userGroupRows = await db
+        .select({ id: groups.id })
+        .from(groups)
+        .where(inArray(groups.slug, userGroupSlugs));
+
+      const groupIds = userGroupRows.map((g) => g.id);
+
+      if (groupIds.length > 0) {
+        const groupVisRows = await db
+          .select({ photoId: photoGroupVisibility.photoId })
+          .from(photoGroupVisibility)
+          .where(inArray(photoGroupVisibility.groupId, groupIds));
+        accessiblePrivatePhotoIds = groupVisRows.map((r) => r.photoId);
+      }
+    }
+
+    // Individuellen User-Zugriff prüfen
+    if (userId) {
+      const userAccessRows = await db
+        .select({ photoId: photoUserAccess.photoId })
+        .from(photoUserAccess)
+        .where(eq(photoUserAccess.userId, userId));
+      const userAccessIds = userAccessRows.map((r) => r.photoId);
+      accessiblePrivatePhotoIds = [...new Set([...accessiblePrivatePhotoIds, ...userAccessIds])];
+    }
+
+    // Fotos laden: öffentliche + freigeschaltete private
+    const whereCondition =
+      accessiblePrivatePhotoIds.length > 0
+        ? and(
+            eq(photos.albumId, albumId),
+            or(eq(photos.isPrivate, false), inArray(photos.id, accessiblePrivatePhotoIds))
+          )
+        : and(eq(photos.albumId, albumId), eq(photos.isPrivate, false));
+
     return await db
       .select({
         id: photos.id,
@@ -316,8 +416,8 @@ async function getAlbumPhotos(albumId: number) {
         height: photos.height,
       })
       .from(photos)
-      .where(and(eq(photos.albumId, albumId), eq(photos.isPrivate, false)))
-      .orderBy(photos.sortOrder, photos.createdAt);
+      .where(whereCondition)
+      .orderBy(...orderBy);
   } catch {
     return [];
   }
@@ -365,25 +465,32 @@ export default async function AlbumPage({ params }: Props) {
   const album = await getAlbum(slug);
   if (!album || !album.isActive) notFound();
 
+  const isAdmin = !!(session?.user as { isMainAdmin?: boolean })?.isMainAdmin;
+
   // Sichtbarkeits-Check
   const userGroupSlugs: string[] = [
     "public",
     ...((session?.user as { groups?: string[] })?.groups ?? []),
   ];
-  const canView = await checkVisibility(album.id, userGroupSlugs);
+  // Admin darf immer alle Alben sehen
+  const canView = isAdmin || await checkVisibility(album.id, userGroupSlugs);
 
   if (!canView) {
     if (!session?.user) redirect("/login");
     notFound();
   }
 
+  const userId = session?.user
+    ? parseInt((session.user as { id: string }).id)
+    : null;
+
   // Eltern-Album für Breadcrumb
   const parentAlbum = album.parentId ? await getAlbumById(album.parentId) : null;
 
   // Unteralben + Medien + Cover parallel laden
   const [childAlbums, albumPhotos, albumVideos, coverPhoto] = await Promise.all([
-    getAccessibleChildAlbums(album.id, userGroupSlugs, album.childSortMode ?? "order"),
-    getAlbumPhotos(album.id),
+    getAccessibleChildAlbums(album.id, userGroupSlugs, album.childSortMode ?? "order", isAdmin),
+    getAlbumPhotos(album.id, isAdmin, userId, userGroupSlugs, album.photoSortMode ?? "created_asc"),
     getAlbumVideos(album.id),
     album.coverPhotoId ? getCoverPhoto(album.coverPhotoId) : Promise.resolve(null),
   ]);

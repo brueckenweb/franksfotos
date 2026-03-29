@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import AdminNav from "@/components/admin/AdminNav";
+import { isAdmin as checkIsAdmin } from "@/lib/auth/permissions";
 
 export const metadata: Metadata = {
   title: "Admin – FranksFotos",
@@ -16,6 +17,13 @@ export default async function AdminLayout({
 
   if (!session?.user) {
     redirect("/login");
+  }
+
+  const isMainAdmin = !!(session.user as { isMainAdmin?: boolean }).isMainAdmin;
+  const userPermissions = (session.user as { permissions?: string[] }).permissions ?? [];
+
+  if (!checkIsAdmin(userPermissions, isMainAdmin)) {
+    redirect("/");
   }
 
   return (

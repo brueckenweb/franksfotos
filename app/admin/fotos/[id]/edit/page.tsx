@@ -3,19 +3,22 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Save, Loader2, Tag as TagIcon } from "lucide-react";
+import { ArrowLeft, Save, Loader2, Tag as TagIcon, Users, Lock } from "lucide-react";
 import PhotoZoom from "@/app/foto/[id]/PhotoZoom";
 import ExifBox from "@/app/foto/[id]/ExifBox";
-
-interface Album {
-  id: number;
-  name: string;
-}
+import AlbumTreeSelect, { AlbumOption } from "@/app/admin/alben/AlbumTreeSelect";
 
 interface Tag {
   id: number;
   name: string;
   slug: string;
+}
+
+interface Group {
+  id: number;
+  name: string;
+  slug: string;
+  description: string | null;
 }
 
 export default function EditFotoPage() {
@@ -25,9 +28,11 @@ export default function EditFotoPage() {
 
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
-  const [albums, setAlbums] = useState<Album[]>([]);
+  const [albums, setAlbums] = useState<AlbumOption[]>([]);
   const [allTags, setAllTags] = useState<Tag[]>([]);
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+  const [allGroups, setAllGroups] = useState<Group[]>([]);
+  const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([]);
   const [error, setError] = useState("");
   const [photoFileUrl, setPhotoFileUrl] = useState("");
   const [photoAlt, setPhotoAlt] = useState("Vorschau");
@@ -46,14 +51,16 @@ export default function EditFotoPage() {
   useEffect(() => {
     async function load() {
       try {
-        const [photoRes, albumsRes, tagsRes] = await Promise.all([
+        const [photoRes, albumsRes, tagsRes, groupsRes] = await Promise.all([
           fetch(`/api/photos/${photoId}`),
           fetch("/api/albums"),
           fetch("/api/tags"),
+          fetch("/api/groups"),
         ]);
         const photoData = await photoRes.json();
         const albumsData = await albumsRes.json();
         const tagsData = await tagsRes.json();
+        const groupsData = await groupsRes.json();
 
         if (photoData.photo) {
           setForm({
@@ -71,10 +78,14 @@ export default function EditFotoPage() {
           if (photoData.photo.tags) {
             setSelectedTagIds(photoData.photo.tags.map((t: Tag) => t.id));
           }
+          if (photoData.photo.groupIds) {
+            setSelectedGroupIds(photoData.photo.groupIds);
+          }
         }
 
         setAlbums(albumsData.albums || []);
         setAllTags(tagsData.tags || []);
+        setAllGroups(groupsData.groups || []);
       } catch {
         setError("Foto konnte nicht geladen werden");
       } finally {
@@ -87,6 +98,12 @@ export default function EditFotoPage() {
   function toggleTag(tagId: number) {
     setSelectedTagIds((prev) =>
       prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId]
+    );
+  }
+
+  function toggleGroup(groupId: number) {
+    setSelectedGroupIds((prev) =>
+      prev.includes(groupId) ? prev.filter((id) => id !== groupId) : [...prev, groupId]
     );
   }
 
@@ -107,6 +124,7 @@ export default function EditFotoPage() {
           sortOrder: parseInt(form.sortOrder) || 0,
           bnummer: form.bnummer || null,
           tagIds: selectedTagIds,
+          groupIds: selectedGroupIds,
         }),
       });
 
@@ -197,18 +215,12 @@ export default function EditFotoPage() {
 
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-1.5">Album</label>
-              <select
+              <AlbumTreeSelect
+                albums={albums}
                 value={form.albumId}
-                onChange={(e) => setForm((p) => ({ ...p, albumId: e.target.value }))}
-                className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
-              >
-                <option value="">Kein Album</option>
-                {albums.map((a) => (
-                  <option key={a.id} value={String(a.id)}>
-                    {a.name}
-                  </option>
-                ))}
-              </select>
+                onChange={(val) => setForm((p) => ({ ...p, albumId: val }))}
+                noSelectionLabel="— Kein Album —"
+              />
             </div>
 
             {/* Tags */}
@@ -260,7 +272,8 @@ export default function EditFotoPage() {
               />
             </div>
 
-            <div>
+            {/* Privat-Einstellung */}
+            <div className="border border-gray-800 rounded-lg p-4 space-y-3">
               <label className="flex items-center gap-2.5 cursor-pointer">
                 <input
                   type="checkbox"
@@ -268,8 +281,55 @@ export default function EditFotoPage() {
                   onChange={(e) => setForm((p) => ({ ...p, isPrivate: e.target.checked }))}
                   className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-amber-500"
                 />
-                <span className="text-gray-300 text-sm">Privat (nur für mich sichtbar)</span>
+                <span className="flex items-center gap-1.5 text-gray-300 text-sm font-medium">
+                  <Lock className="w-3.5 h-3.5 text-amber-400" />
+                  Privat (eingeschränkte Sichtbarkeit)
+                </span>
               </label>
+
+              {/* Gruppen-Freigabe – immer sichtbar, Hinweis wenn nicht privat */}
+              <div>
+                <p className="text-xs font-medium text-gray-400 mb-2 flex items-center gap-1.5">
+                  <Users className="w-3.5 h-3.5" />
+                  Sichtbar für Benutzergruppen
+                  {!form.isPrivate && (
+                    <span className="text-gray-600 font-normal">
+                      (nur relevant wenn „Privat" aktiv)
+                    </span>
+                  )}
+                </p>
+
+                {allGroups.length === 0 ? (
+                  <p className="text-xs text-gray-600">Keine Gruppen vorhanden.</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {allGroups.map((group) => {
+                      const active = selectedGroupIds.includes(group.id);
+                      return (
+                        <button
+                          key={group.id}
+                          type="button"
+                          onClick={() => toggleGroup(group.id)}
+                          title={group.description || group.name}
+                          className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
+                            active
+                              ? "bg-blue-500/20 border-blue-500/50 text-blue-300"
+                              : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-600"
+                          }`}
+                        >
+                          {group.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {selectedGroupIds.length > 0 && (
+                  <p className="text-xs text-gray-600 mt-1.5">
+                    {selectedGroupIds.length} Gruppe{selectedGroupIds.length !== 1 ? "n" : ""} freigeschaltet
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="flex items-center gap-3 pt-2 border-t border-gray-800">

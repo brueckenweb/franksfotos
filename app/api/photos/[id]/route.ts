@@ -8,7 +8,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { photos } from "@/lib/db/schema";
+import { photos, photoTags, tags, photoGroupVisibility } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { hasPermission, PERMISSIONS } from "@/lib/auth/permissions";
 
@@ -35,7 +35,26 @@ export async function GET(
       return NextResponse.json({ error: "Foto nicht gefunden" }, { status: 404 });
     }
 
-    return NextResponse.json({ photo: result[0] });
+    // Tags laden
+    const photoTagRows = await db
+      .select({ id: tags.id, name: tags.name, slug: tags.slug })
+      .from(photoTags)
+      .innerJoin(tags, eq(photoTags.tagId, tags.id))
+      .where(eq(photoTags.photoId, photoId));
+
+    // Gruppen-Sichtbarkeit laden
+    const groupVisibilityRows = await db
+      .select({ groupId: photoGroupVisibility.groupId })
+      .from(photoGroupVisibility)
+      .where(eq(photoGroupVisibility.photoId, photoId));
+
+    return NextResponse.json({
+      photo: {
+        ...result[0],
+        tags: photoTagRows,
+        groupIds: groupVisibilityRows.map((r) => r.groupId),
+      },
+    });
   } catch (error) {
     console.error("GET /api/photos/[id] Fehler:", error);
     return NextResponse.json({ error: "Interner Server-Fehler" }, { status: 500 });
@@ -63,8 +82,9 @@ export async function PUT(
     const photoId = parseInt(id);
     const body = await request.json();
 
-    const { title, description, albumId, isPrivate, sortOrder, bnummer } = body;
+    const { title, description, albumId, isPrivate, sortOrder, bnummer, tagIds, groupIds } = body;
 
+    // Foto-Daten aktualisieren
     await db
       .update(photos)
       .set({
@@ -76,6 +96,26 @@ export async function PUT(
         bnummer: bnummer ?? null,
       })
       .where(eq(photos.id, photoId));
+
+    // Tags aktualisieren
+    if (Array.isArray(tagIds)) {
+      await db.delete(photoTags).where(eq(photoTags.photoId, photoId));
+      if (tagIds.length > 0) {
+        await db.insert(photoTags).values(
+          tagIds.map((tagId: number) => ({ photoId, tagId }))
+        );
+      }
+    }
+
+    // Gruppen-Sichtbarkeit aktualisieren
+    if (Array.isArray(groupIds)) {
+      await db.delete(photoGroupVisibility).where(eq(photoGroupVisibility.photoId, photoId));
+      if (groupIds.length > 0) {
+        await db.insert(photoGroupVisibility).values(
+          groupIds.map((groupId: number) => ({ photoId, groupId }))
+        );
+      }
+    }
 
     return NextResponse.json({ success: true });
   } catch (error) {

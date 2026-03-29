@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { albums, albumVisibility, groups, photos } from "@/lib/db/schema";
 import { eq, count, and, inArray } from "drizzle-orm";
 import { Camera, FolderOpen, LogIn, ArrowLeft, ChevronRight } from "lucide-react";
+import { isAdmin as checkIsAdmin } from "@/lib/auth/permissions";
 
 /** Gibt alle Nachkommen-IDs eines Albums zurück (BFS) */
 function getDescendantIds(albumId: number, childMap: Map<number, number[]>): number[] {
@@ -17,24 +18,35 @@ function getDescendantIds(albumId: number, childMap: Map<number, number[]>): num
   return result;
 }
 
-async function getAccessibleAlbums(userGroupSlugs: string[]) {
+async function getAccessibleAlbums(userGroupSlugs: string[], isAdmin = false) {
   try {
-    const userGroups = await db
-      .select({ id: groups.id })
-      .from(groups)
-      .where(inArray(groups.slug, userGroupSlugs));
+    let albumIds: number[];
 
-    const groupIds = userGroups.map((g) => g.id);
-    if (groupIds.length === 0) return [];
+    if (isAdmin) {
+      // Admin sieht alle aktiven Alben ohne Sichtbarkeits-Filter
+      const allActive = await db
+        .select({ id: albums.id })
+        .from(albums)
+        .where(eq(albums.isActive, true));
+      albumIds = allActive.map((a) => a.id);
+    } else {
+      const userGroups = await db
+        .select({ id: groups.id })
+        .from(groups)
+        .where(inArray(groups.slug, userGroupSlugs));
 
-    const visibleEntries = await db
-      .selectDistinct({ albumId: albumVisibility.albumId })
-      .from(albumVisibility)
-      .where(inArray(albumVisibility.groupId, groupIds));
+      const groupIds = userGroups.map((g) => g.id);
+      if (groupIds.length === 0) return [];
 
-    const albumIds = visibleEntries
-      .map((v) => v.albumId)
-      .filter((id): id is number => id !== null);
+      const visibleEntries = await db
+        .selectDistinct({ albumId: albumVisibility.albumId })
+        .from(albumVisibility)
+        .where(inArray(albumVisibility.groupId, groupIds));
+
+      albumIds = visibleEntries
+        .map((v) => v.albumId)
+        .filter((id): id is number => id !== null);
+    }
 
     if (albumIds.length === 0) return [];
 
@@ -207,12 +219,16 @@ function sortChildren(children: Album[], mode: string): Album[] {
 export default async function AlbenPage() {
   const session = await auth();
 
+  const isMainAdmin = !!(session?.user as { isMainAdmin?: boolean })?.isMainAdmin;
+  const userPermissions = (session?.user as { permissions?: string[] })?.permissions ?? [];
+  const showAdminLink = checkIsAdmin(userPermissions, isMainAdmin);
+
   const userGroupSlugs: string[] = [
     "public",
     ...((session?.user as { groups?: string[] })?.groups ?? []),
   ];
 
-  const accessibleAlbums = await getAccessibleAlbums(userGroupSlugs);
+  const accessibleAlbums = await getAccessibleAlbums(userGroupSlugs, isMainAdmin);
   const accessibleIds = new Set(accessibleAlbums.map((a) => a.id));
 
   // Nur Alben ohne Parent (oder mit nicht-zugänglichem Parent) sind Root-Alben
@@ -258,9 +274,11 @@ export default async function AlbenPage() {
             <div className="flex items-center gap-4">
               {session?.user ? (
                 <>
-                  <Link href="/admin" className="text-sm text-gray-400 hover:text-white transition-colors">
-                    Admin
-                  </Link>
+                  {showAdminLink && (
+                    <Link href="/admin" className="text-sm text-gray-400 hover:text-white transition-colors">
+                      Admin
+                    </Link>
+                  )}
                   <Link href="/profil" className="text-sm text-gray-400 hover:text-white transition-colors">
                     {session.user.name}
                   </Link>

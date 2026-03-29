@@ -2,9 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { photos, albums, comments, users, likes, tags, tagGroups, photoTags } from "@/lib/db/schema";
-import { eq, and, count, asc } from "drizzle-orm";
-import { ArrowLeft, ChevronLeft, ChevronRight, Download, FolderOpen, Lock, MessageSquare, User } from "lucide-react";
+import { photos, albums, comments, users, likes, tags, tagGroups, photoTags, photoGroupVisibility, photoUserAccess, userGroups } from "@/lib/db/schema";
+import { eq, and, count, asc, inArray } from "drizzle-orm";
+import { ArrowLeft, ChevronLeft, ChevronRight, Download, FolderOpen, Lock, MessageSquare, Pencil, User } from "lucide-react";
 import LikeButton from "./LikeButton";
 import CommentForm from "./CommentForm";
 import TagInput from "./TagInput";
@@ -31,6 +31,7 @@ async function getPhoto(id: number) {
         exifData: photos.exifData,
         createdAt: photos.createdAt,
         albumId: photos.albumId,
+        createdBy: photos.createdBy,
         albumName: albums.name,
         albumSlug: albums.slug,
         uploaderName: users.name,
@@ -146,11 +147,60 @@ export default async function FotoPage({ params }: Props) {
   const photo = await getPhoto(photoId);
 
   if (!photo) notFound();
-  if (photo.isPrivate && !session?.user) notFound();
 
   const userId = session?.user
     ? parseInt((session.user as { id: string }).id)
     : null;
+
+  const isAdmin = !!(session?.user as { isMainAdmin?: boolean })?.isMainAdmin;
+
+  // Zugriffscheck für private Fotos
+  if (photo.isPrivate) {
+    if (!session?.user || !userId) notFound(); // nicht eingeloggt
+
+    if (!isAdmin) {
+      // Eigentümer darf immer sehen
+      const isCreator = userId === photo.createdBy;
+
+      if (!isCreator) {
+        // Individueller Zugriff per photoUserAccess?
+        const userAccessRows = await db
+          .select({ photoId: photoUserAccess.photoId })
+          .from(photoUserAccess)
+          .where(and(eq(photoUserAccess.photoId, photoId), eq(photoUserAccess.userId, userId)))
+          .limit(1);
+
+        const hasUserAccess = userAccessRows.length > 0;
+
+        if (!hasUserAccess) {
+          // Gruppen-Zugriff prüfen: Ist der User in einer Gruppe die das Foto sehen darf?
+          const userGroupRows = await db
+            .select({ groupId: userGroups.groupId })
+            .from(userGroups)
+            .where(eq(userGroups.userId, userId));
+
+          const groupIds = userGroupRows.map((g) => g.groupId);
+          let hasGroupAccess = false;
+
+          if (groupIds.length > 0) {
+            const groupAccessRows = await db
+              .select({ photoId: photoGroupVisibility.photoId })
+              .from(photoGroupVisibility)
+              .where(
+                and(
+                  eq(photoGroupVisibility.photoId, photoId),
+                  inArray(photoGroupVisibility.groupId, groupIds)
+                )
+              )
+              .limit(1);
+            hasGroupAccess = groupAccessRows.length > 0;
+          }
+
+          if (!hasGroupAccess) notFound();
+        }
+      }
+    }
+  }
 
   const [photoComments, likeCount, userHasLiked, fetchedPhotoTags, neighbors] = await Promise.all([
     getPhotoComments(photoId),
@@ -159,8 +209,6 @@ export default async function FotoPage({ params }: Props) {
     getPhotoTags(photoId),
     getAlbumNeighbors(photoId, photo.albumId ?? null),
   ]) as [any[], number, boolean, any[], { prevId: number | null; nextId: number | null }];
-
-  const isAdmin = !!(session?.user as { isMainAdmin?: boolean })?.isMainAdmin;
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -338,6 +386,18 @@ export default async function FotoPage({ params }: Props) {
                 </a>
               )}
             </div>
+
+            {/* Admin: Foto bearbeiten */}
+            {isAdmin && (
+              <Link
+                href={`/admin/fotos/${photo.id}/edit`}
+                className="flex items-center gap-2 w-full justify-center px-4 py-2 bg-amber-600 hover:bg-amber-500 text-white rounded-lg text-sm font-medium transition-colors border border-amber-500"
+                title="Foto bearbeiten (Admin)"
+              >
+                <Pencil className="w-4 h-4" />
+                Foto bearbeiten
+              </Link>
+            )}
 
             {/* Kommentare */}
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">

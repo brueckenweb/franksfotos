@@ -3,6 +3,10 @@ import bcrypt from "bcryptjs";
 import { db } from "@/lib/db";
 import { users } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
+import {
+  sendNewUserNotificationToAdmin,
+  sendWelcomeEmailToUser,
+} from "@/lib/emails/emailService";
 
 export async function POST(request: NextRequest) {
   try {
@@ -57,6 +61,10 @@ export async function POST(request: NextRequest) {
       .from(users)
       .where(eq(users.email, email))
       .limit(1);
+
+    // E-Mails versenden (nicht-blockierend, Fehler werden nur geloggt)
+    sendNewUserNotificationToAdmin(name, email);
+    sendWelcomeEmailToUser(name, email);
 
     return NextResponse.json(
       { message: "Registrierung erfolgreich!", user: newUser },
