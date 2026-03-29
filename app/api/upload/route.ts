@@ -70,20 +70,23 @@ export async function POST(request: NextRequest) {
     const phpPath = albumSlug ? `${phpFolder}/${albumSlug}` : phpFolder;
 
     const phpEndpoint = UPLOAD_CONFIG.phpEndpoint;
-    const uploadFormData = new FormData();
-    uploadFormData.append("file", file, finalFileName);
-    uploadFormData.append("path", phpPath);
-    uploadFormData.append("apiKey", process.env.UPLOAD_API_KEY || "");
 
-    // API-Key als Header senden (NICHT im POST-Body):
-    // Wenn post_max_size auf dem PHP-Server überschritten wird, leert PHP
-    // $_POST komplett – der Header ist davon unabhängig und immer verfügbar.
+    // Datei als raw binary senden (application/octet-stream).
+    // Das umgeht PHP's post_max_size-Limit, das multipart/form-data-Uploads
+    // auf 8 MB (Standard) begrenzt. php://input ist davon NICHT betroffen.
+    // Metadaten (Pfad, Dateiname) gehen als HTTP-Header mit.
+    const fileBuffer = await file.arrayBuffer();
+
     const uploadResponse = await fetch(phpEndpoint, {
       method: "POST",
       headers: {
-        "X-API-Key": process.env.UPLOAD_API_KEY || "",
+        "X-API-Key":    process.env.UPLOAD_API_KEY || "",
+        "X-Upload-Path": phpPath,
+        "X-Upload-Name": finalFileName,
+        "Content-Type":  file.type || "application/octet-stream",
+        "Content-Length": String(file.size),
       },
-      body: uploadFormData,
+      body: fileBuffer,
     });
 
     if (!uploadResponse.ok) {
