@@ -18,6 +18,8 @@ import {
   FolderOpen,
   Play,
   ChevronRight,
+  Upload,
+  Pencil,
 } from "lucide-react";
 import DownloadButton from "./DownloadButton";
 import PhotoThumbnail from "./PhotoThumbnail";
@@ -540,6 +542,28 @@ export default async function AlbumPage({ params }: Props) {
               <span className="text-gray-600 ml-1 flex-shrink-0">
                 • {totalMedia} Medien
               </span>
+            )}
+
+            {/* Admin-Buttons */}
+            {isAdmin && (
+              <div className="ml-auto flex items-center gap-2 flex-shrink-0 pl-4">
+                <Link
+                  href={`/admin/upload?albumId=${album.id}`}
+                  className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-500 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                  title="Fotos zu diesem Album hochladen"
+                >
+                  <Upload className="w-3.5 h-3.5" />
+                  Fotos hinzufügen
+                </Link>
+                <Link
+                  href={`/admin/alben/${album.id}/edit`}
+                  className="flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-white text-xs font-medium px-3 py-1.5 rounded-lg transition-colors"
+                  title="Album bearbeiten"
+                >
+                  <Pencil className="w-3.5 h-3.5" />
+                  Album bearbeiten
+                </Link>
+              </div>
             )}
           </div>
         </div>
