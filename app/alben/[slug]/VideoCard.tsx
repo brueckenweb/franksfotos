@@ -17,6 +17,20 @@ function formatDuration(seconds: number): string {
   return `${m}:${String(s).padStart(2, "0")}`;
 }
 
+/** MIME-Typ aus Dateiendung ableiten */
+function getVideoMimeType(url: string): string {
+  const ext = url.split(".").pop()?.toLowerCase() ?? "";
+  const map: Record<string, string> = {
+    mp4: "video/mp4",
+    m4v: "video/mp4",
+    mov: "video/quicktime",
+    webm: "video/webm",
+    avi: "video/x-msvideo",
+    mkv: "video/x-matroska",
+  };
+  return map[ext] || "video/mp4";
+}
+
 export default function VideoCard({
   filename,
   title,
@@ -105,12 +119,12 @@ export default function VideoCard({
             onClick={(e) => e.stopPropagation()}
           >
             <video
-              src={fileUrl}
               controls
               autoPlay
               className="w-full rounded-xl shadow-2xl bg-black"
               style={{ maxHeight: "80vh" }}
             >
+              <source src={fileUrl} type={getVideoMimeType(fileUrl)} />
               Ihr Browser unterstützt dieses Videoformat nicht.
             </video>
 

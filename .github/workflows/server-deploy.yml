@@ -188,6 +188,16 @@ jobs:
             pm2 save
           '
 
+      - name: Deploye PHP-Upload-Dateien zu pics.frank-sellke.de
+        run: |
+          echo "=== Übertrage PHP-Upload-Dateien ==="
+          scp -o StrictHostKeyChecking=no -i /tmp/ssh_key \
+            server-upload/upload.php \
+            server-upload/.htaccess \
+            server-upload/.user.ini \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:${{ secrets.PICS_DEPLOY_PATH }}/
+          echo "✓ PHP-Upload-Dateien übertragen"
+
       - name: Lösche alte Workflow-Runs (älter als 14 Tage)
         if: success()
         env:

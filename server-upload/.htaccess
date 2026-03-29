@@ -2,6 +2,18 @@
 # Diese .htaccess in den Webroot von pics.frank-sellke.de hochladen
 
 # ==============================================================
+# MIME-TYPEN (wichtig für Browser-Videoabspieler)
+# ==============================================================
+AddType video/mp4         .mp4 .m4v
+AddType video/quicktime   .mov
+AddType video/webm        .webm
+AddType video/x-msvideo   .avi
+AddType video/x-matroska  .mkv
+AddType image/jpeg        .jpg .jpeg
+AddType image/png         .png
+AddType image/webp        .webp
+
+# ==============================================================
 # SICHERHEIT: Direkten Zugriff auf PHP-Dateien einschränken
 # ==============================================================
 
@@ -30,10 +42,12 @@
 
 # ==============================================================
 # CORS: Bilder/Videos dürfen von frank-sellke.de geladen werden
+# (mit und ohne www)
 # ==============================================================
 <IfModule mod_headers.c>
     <FilesMatch "\.(jpg|jpeg|png|webp|gif|mp4|mov|webm)$">
-        Header set Access-Control-Allow-Origin "https://www.frank-sellke.de"
+        SetEnvIf Origin "^https://(www\.)?frank-sellke\.de$" CORS_ORIGIN=$0
+        Header always set Access-Control-Allow-Origin "%{CORS_ORIGIN}e" env=CORS_ORIGIN
     </FilesMatch>
 </IfModule>
 
