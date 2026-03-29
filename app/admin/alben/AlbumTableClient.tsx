@@ -39,7 +39,9 @@ export default function AlbumTableClient({
   childrenMap,
   isDragEnabled = false,
 }: Props) {
-  const [collapsed, setCollapsed] = useState<Set<number>>(new Set());
+  const [collapsed, setCollapsed] = useState<Set<number>>(
+    () => new Set(rootAlbums.filter((a) => (childrenMap[a.id]?.length ?? 0) > 0).map((a) => a.id))
+  );
   const [localRootAlbums, setLocalRootAlbums] = useState(rootAlbums);
   const [localChildrenMap, setLocalChildrenMap] = useState(childrenMap);
   const [dragId, setDragId] = useState<number | null>(null);

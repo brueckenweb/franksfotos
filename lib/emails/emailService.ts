@@ -37,7 +37,7 @@ export async function sendNewUserNotificationToAdmin(
                 <td style="padding: 8px; color: #111827;">${new Date().toLocaleString("de-DE", { timeZone: "Europe/Berlin" })}</td>
               </tr>
             </table>
-            <a href="${process.env.NEXTAUTH_URL || "https://fotos.frank-sellke.de"}/admin/benutzer"
+            <a href="${process.env.NEXTAUTH_URL || "https://www.frank-sellke.de"}/admin/benutzer"
                style="display: inline-block; background: #f59e0b; color: white; padding: 10px 20px; border-radius: 6px; text-decoration: none; font-weight: bold;">
               Zur Benutzerverwaltung
             </a>
@@ -82,7 +82,7 @@ export async function sendWelcomeEmailToUser(
               die Fotogalerie in vollem Umfang nutzen.
             </p>
             <div style="margin: 24px 0; text-align: center;">
-              <a href="${process.env.NEXTAUTH_URL || "https://fotos.frank-sellke.de"}/login"
+              <a href="${process.env.NEXTAUTH_URL || "https://www.frank-sellke.de"}/login"
                  style="display: inline-block; background: #f59e0b; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 16px;">
                 Jetzt anmelden
               </a>
@@ -93,7 +93,7 @@ export async function sendWelcomeEmailToUser(
             </p>
           </div>
           <p style="color: #9ca3af; font-size: 12px; margin-top: 16px; text-align: center;">
-            FranksFotos · <a href="${process.env.NEXTAUTH_URL || "https://fotos.frank-sellke.de"}" style="color: #9ca3af;">fotos.frank-sellke.de</a>
+            FranksFotos · <a href="${process.env.NEXTAUTH_URL || "https://www.frank-sellke.de"}" style="color: #9ca3af;">www.frank-sellke.de</a>
           </p>
         </div>
       `,
@@ -136,7 +136,7 @@ export async function sendBroadcastEmail(
               ${htmlContent}
             </div>
             <p style="color: #9ca3af; font-size: 12px; margin-top: 16px; text-align: center;">
-              FranksFotos · <a href="${process.env.NEXTAUTH_URL || "https://fotos.frank-sellke.de"}" style="color: #9ca3af;">fotos.frank-sellke.de</a>
+              FranksFotos · <a href="${process.env.NEXTAUTH_URL || "https://www.frank-sellke.de"}" style="color: #9ca3af;">www.frank-sellke.de</a>
             </p>
           </div>
         `,

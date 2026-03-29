@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Save, Loader2 } from "lucide-react";
+import { ArrowLeft, Save, Loader2, Upload } from "lucide-react";
 import AlbumTreeSelect from "../AlbumTreeSelect";
 import type { AlbumOption } from "../AlbumTreeSelect";
 
@@ -53,8 +53,7 @@ export default function NeuesAlbumPage() {
     }));
   }
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
+  async function saveAlbum(redirectToUpload = false) {
     setError("");
     setLoading(true);
 
@@ -86,13 +85,22 @@ export default function NeuesAlbumPage() {
         return;
       }
 
-      router.push("/admin/alben");
+      if (redirectToUpload && data.albumId) {
+        router.push(`/admin/upload?albumId=${data.albumId}`);
+      } else {
+        router.push("/admin/alben");
+      }
       router.refresh();
     } catch {
       setError("Netzwerkfehler");
     } finally {
       setLoading(false);
     }
+  }
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    await saveAlbum(false);
   }
 
   return (
@@ -278,7 +286,7 @@ export default function NeuesAlbumPage() {
         </div>
 
         {/* Buttons */}
-        <div className="flex items-center gap-3 pt-2">
+        <div className="flex flex-wrap items-center gap-3 pt-2">
           <button
             type="submit"
             disabled={loading}
@@ -290,6 +298,23 @@ export default function NeuesAlbumPage() {
               <Save className="w-4 h-4" />
             )}
             Album speichern
+          </button>
+          <button
+            type="button"
+            disabled={loading}
+            onClick={(e) => {
+              const form = (e.target as HTMLElement).closest("form") as HTMLFormElement;
+              if (!form.reportValidity()) return;
+              saveAlbum(true);
+            }}
+            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+          >
+            {loading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Upload className="w-4 h-4" />
+            )}
+            Speichern &amp; Fotos eingeben
           </button>
           <Link
             href="/admin/alben"
