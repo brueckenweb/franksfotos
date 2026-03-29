@@ -41,13 +41,11 @@ AddType image/webp        .webp
 </IfModule>
 
 # ==============================================================
-# CORS: Bilder/Videos dürfen von frank-sellke.de geladen werden
-# (mit und ohne www)
+# CORS: Bilder/Videos öffentlich zugänglich (frank-sellke.de)
 # ==============================================================
 <IfModule mod_headers.c>
-    <FilesMatch "\.(jpg|jpeg|png|webp|gif|mp4|mov|webm)$">
-        SetEnvIf Origin "^https://(www\.)?frank-sellke\.de$" CORS_ORIGIN=$0
-        Header always set Access-Control-Allow-Origin "%{CORS_ORIGIN}e" env=CORS_ORIGIN
+    <FilesMatch "\.(jpg|jpeg|png|webp|gif|mp4|mov|webm|mkv|avi)$">
+        Header always set Access-Control-Allow-Origin "*"
     </FilesMatch>
 </IfModule>
 
