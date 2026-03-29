@@ -261,31 +261,62 @@ jobs:
           if [ -n "$PICS_WEBROOT" ]; then
             echo "✓ Verwende PICS_DEPLOY_PATH Secret: $PICS_WEBROOT"
           else
-            # Strategie 2: Existierende upload.php auf dem Server finden
-            echo "Suche upload.php auf dem Server..."
-            FOUND=$(ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key \
-              ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} \
-              'find /home /var/www -name "upload.php" -not -path "*/frank-sellke/*" 2>/dev/null | head -5')
-            echo "Gefundene upload.php Pfade: $FOUND"
+            # Strategie 2: Apache-Konfiguration nach pics.frank-sellke.de durchsuchen
+            echo "Suche pics.frank-sellke.de in Apache-Konfiguration..."
+            PICS_WEBROOT=$(ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key \
+              ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
+                grep -r "pics\.frank-sellke\.de" \
+                  /etc/apache2/sites-enabled/ \
+                  /etc/apache2/vhosts.d/ \
+                  /etc/apache2/conf.d/ \
+                  /etc/httpd/conf.d/ \
+                  /etc/httpd/vhosts.d/ \
+                  /usr/local/etc/apache24/Includes/ \
+                  2>/dev/null | \
+                grep -i "DocumentRoot\|document_root\|VirtualHost\|ServerName" | \
+                grep -i "DocumentRoot" | \
+                head -1 | \
+                sed "s/.*DocumentRoot[[:space:]]*//" | \
+                tr -d "\"'"'"'" | \
+                awk "{print \$1}"
+              ')
+            echo "Aus Apache-Config: '$PICS_WEBROOT'"
 
-            if [ -n "$FOUND" ]; then
-              # Ersten Treffer nehmen und Verzeichnis extrahieren
-              PICS_WEBROOT=$(echo "$FOUND" | head -1 | xargs dirname)
-              echo "✓ Webroot via upload.php gefunden: $PICS_WEBROOT"
+            # Strategie 3: Hosting-Panel-Konfiguration lesen (keyhelp/ispconfig)
+            if [ -z "$PICS_WEBROOT" ]; then
+              echo "Suche im Hosting-Panel..."
+              PICS_WEBROOT=$(ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key \
+                ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
+                  # KeyHelp vhost-Konfiguration
+                  grep -r "pics\.frank-sellke\.de" /etc/apache2/ /etc/nginx/ 2>/dev/null | \
+                  grep -i "root\|docroot" | head -1 | \
+                  sed "s/.*root[[:space:]]*//" | tr -d "\";" | awk "{print \$1}"
+                ')
+              echo "Aus Hosting-Config: '$PICS_WEBROOT'"
+            fi
+
+            # Strategie 4: Im User-Verzeichnis suchen
+            if [ -z "$PICS_WEBROOT" ]; then
+              echo "Zeige alle www-Verzeichnisse des Users für manuelle Diagnose..."
+              ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key \
+                ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
+                  echo "=== Inhalt von ~/www/ ==="
+                  ls -la ~/www/ 2>/dev/null || ls -la /home/users/$USER/www/ 2>/dev/null || echo "(nicht zugänglich)"
+                  echo ""
+                  echo "=== Suche nach pics-Verzeichnissen ==="
+                  find ~ -maxdepth 5 -type d \( -name "pics" -o -name "pics.frank-sellke.de" -o -name "pictures" \) 2>/dev/null
+                  echo ""
+                  echo "=== Apache vhosts (pics) ==="
+                  grep -r "pics" /etc/apache2/sites-enabled/ 2>/dev/null | grep -i "ServerName\|DocumentRoot" | head -20 || echo "(keine Treffer)"
+                '
             fi
           fi
 
           if [ -z "$PICS_WEBROOT" ]; then
-            # Strategie 3: Alle www-Unterverzeichnisse des Users auflisten
-            echo "Strategie 3: Liste alle verfügbaren Verzeichnisse..."
-            ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key \
-              ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} \
-              'find /home/users -maxdepth 4 -type d -name "pics*" 2>/dev/null; echo "---"; ls /home/users/franksellke/www/ 2>/dev/null || true'
-
             echo ""
             echo "❌ Webroot von pics.frank-sellke.de konnte nicht gefunden werden!"
             echo "   → Bitte GitHub Secret 'PICS_DEPLOY_PATH' mit dem korrekten Pfad setzen."
-            echo "   → Beispiel: /home/users/franksellke/www/pics"
+            echo "   → Den Pfad aus den Logs oben ablesen."
             exit 0
           fi
 
