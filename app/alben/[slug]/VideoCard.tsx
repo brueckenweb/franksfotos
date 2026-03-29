@@ -204,12 +204,22 @@ export default function VideoCard({
               <div className="flex flex-col gap-3 bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-4">
                 <div className="flex items-start gap-2 text-sm text-red-300">
                   <AlertTriangle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                  <span>
-                    Das Video konnte nicht abgespielt werden. Das Format{" "}
-                    <strong>{formatLabel(effectiveMimeType)}</strong> wird von
-                    deinem Browser möglicherweise nicht unterstützt, oder die
-                    Datei ist nicht erreichbar.
-                  </span>
+                  <div className="flex flex-col gap-1">
+                    <span>
+                      Das Video konnte nicht abgespielt werden.
+                    </span>
+                    {(effectiveMimeType === "video/quicktime" || effectiveMimeType === "video/x-msvideo" || effectiveMimeType === "video/x-matroska") ? (
+                      <span className="text-red-400/80 text-xs">
+                        Das Format <strong>{formatLabel(effectiveMimeType)}</strong> wird von Chrome/Firefox nicht unterstützt.
+                        Bitte lade die Datei herunter oder öffne sie in Safari.
+                      </span>
+                    ) : (
+                      <span className="text-red-400/80 text-xs">
+                        Möglicherweise verwendet das Video den HEVC/H.265-Codec, der in Chrome ohne
+                        Hardware-Unterstützung nicht läuft. Bitte lade die Datei herunter oder nutze Safari.
+                      </span>
+                    )}
+                  </div>
                 </div>
                 <a
                   href={`/api/video-download?url=${encodeURIComponent(fileUrl)}&filename=${encodeURIComponent(filename)}`}
