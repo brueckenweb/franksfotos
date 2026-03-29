@@ -6,6 +6,7 @@ import { Play, X } from "lucide-react";
 interface VideoCardProps {
   filename: string;
   title: string | null;
+  description?: string | null;
   fileUrl: string;
   thumbnailUrl: string | null;
   duration?: number | null;
@@ -34,6 +35,7 @@ function getVideoMimeType(url: string): string {
 export default function VideoCard({
   filename,
   title,
+  description,
   fileUrl,
   thumbnailUrl,
   duration,
@@ -95,6 +97,9 @@ export default function VideoCard({
           <p className="text-sm font-medium text-white truncate group-hover:text-blue-400 transition-colors">
             {title || filename}
           </p>
+          {description && (
+            <p className="text-xs text-gray-500 truncate mt-0.5">{description}</p>
+          )}
         </div>
       </div>
 
@@ -129,9 +134,12 @@ export default function VideoCard({
             </video>
 
             {(title || filename) && (
-              <p className="text-white/50 text-sm text-center">
+              <p className="text-white/70 text-sm text-center font-medium">
                 {title || filename}
               </p>
+            )}
+            {description && (
+              <p className="text-white/40 text-xs text-center">{description}</p>
             )}
           </div>
         </div>

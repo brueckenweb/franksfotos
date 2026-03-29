@@ -444,6 +444,7 @@ async function getAlbumVideos(albumId: number) {
         id: videos.id,
         filename: videos.filename,
         title: videos.title,
+        description: videos.description,
         fileUrl: videos.fileUrl,
         thumbnailUrl: videos.thumbnailUrl,
         duration: videos.duration,
@@ -646,6 +647,7 @@ export default async function AlbumPage({ params }: Props) {
                   key={video.id}
                   filename={video.filename}
                   title={video.title ?? null}
+                  description={video.description ?? null}
                   fileUrl={video.fileUrl}
                   thumbnailUrl={video.thumbnailUrl ?? null}
                   duration={video.duration ?? null}
