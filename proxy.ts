@@ -19,7 +19,8 @@ export const config = {
      * - _next/image (Bildoptimierung)
      * - favicon.ico
      * - public Ordner
+     * - /api/upload (große Datei-Uploads – Auth wird in der Route selbst geprüft)
      */
-    "/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$|api/upload).*)",
   ],
 };

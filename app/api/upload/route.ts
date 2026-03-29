@@ -75,8 +75,14 @@ export async function POST(request: NextRequest) {
     uploadFormData.append("path", phpPath);
     uploadFormData.append("apiKey", process.env.UPLOAD_API_KEY || "");
 
+    // API-Key als Header senden (NICHT im POST-Body):
+    // Wenn post_max_size auf dem PHP-Server überschritten wird, leert PHP
+    // $_POST komplett – der Header ist davon unabhängig und immer verfügbar.
     const uploadResponse = await fetch(phpEndpoint, {
       method: "POST",
+      headers: {
+        "X-API-Key": process.env.UPLOAD_API_KEY || "",
+      },
       body: uploadFormData,
     });
 

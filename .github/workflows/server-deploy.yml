@@ -251,6 +251,59 @@ jobs:
             pm2 logs franksfotos-prod --lines 10 --nostream --err 2>/dev/null || true
           '
 
+      - name: Deploye PHP-Upload-Dateien zu pics.frank-sellke.de
+        run: |
+          echo "=== Suche Webroot von pics.frank-sellke.de ==="
+          PICS_WEBROOT=$(ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} '
+              # Mögliche Pfade für den Webroot von pics.frank-sellke.de
+              for DIR in \
+                /home/users/franksellke/www/pics \
+                /home/users/franksellke/www/pics.frank-sellke.de \
+                /home/users/franksellke/pics \
+                /home/users/franksellke/public_html/pics \
+                /var/www/pics.frank-sellke.de \
+                /var/www/pics; do
+                if [ -d "$DIR" ]; then
+                  echo "$DIR"
+                  break
+                fi
+              done
+            ')
+
+          if [ -z "$PICS_WEBROOT" ]; then
+            echo "⚠ Webroot von pics.frank-sellke.de nicht gefunden – überspringe PHP-Deploy"
+            echo "  Bitte PICS_DEPLOY_PATH als GitHub Secret setzen."
+            exit 0
+          fi
+
+          echo "✓ Webroot gefunden: $PICS_WEBROOT"
+
+          echo "=== Übertrage server-upload Dateien ==="
+          scp -o StrictHostKeyChecking=no -i /tmp/ssh_key \
+            server-upload/upload.php \
+            server-upload/.htaccess \
+            server-upload/.user.ini \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }}:$PICS_WEBROOT/
+
+          echo "✓ upload.php, .htaccess, .user.ini übertragen"
+
+          echo "=== Setze Berechtigungen ==="
+          ssh -o StrictHostKeyChecking=no -i /tmp/ssh_key \
+            ${{ secrets.SERVER_USER }}@${{ secrets.SERVER_HOST }} "
+            chmod 644 $PICS_WEBROOT/upload.php
+            chmod 644 $PICS_WEBROOT/.htaccess
+            chmod 644 $PICS_WEBROOT/.user.ini
+            # Ordner anlegen falls noch nicht vorhanden
+            for DIR in fotos thumbs videos video-thumbs avatars; do
+              mkdir -p $PICS_WEBROOT/\$DIR
+              chmod 755 $PICS_WEBROOT/\$DIR
+            done
+            echo '=== Dateien im Webroot ==='
+            ls -la $PICS_WEBROOT/
+          "
+          echo "✅ PHP-Upload-Server bereit"
+
       - name: Lösche alte Workflow-Runs (älter als 14 Tage)
         if: success()
         env:
