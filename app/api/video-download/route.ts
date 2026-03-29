@@ -79,10 +79,21 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const contentType   = upstream.headers.get("content-type")   ?? "video/mp4";
-  const contentLength = upstream.headers.get("content-length");
-  const contentRange  = upstream.headers.get("content-range");
-  const acceptRanges  = upstream.headers.get("accept-ranges");
+  const rawContentType = upstream.headers.get("content-type") ?? "video/mp4";
+  const contentLength  = upstream.headers.get("content-length");
+  const contentRange   = upstream.headers.get("content-range");
+  const acceptRanges   = upstream.headers.get("accept-ranges");
+
+  /**
+   * Browser-Kompatibilität: video/quicktime (MOV) wird von Chrome/Firefox
+   * nicht unterstützt. Die meisten MOV-Dateien (iPhone, DSLR) verwenden H.264,
+   * das als video/mp4 problemlos abgespielt werden kann.
+   * Für Download-Anfragen wird der originale MIME-Typ beibehalten.
+   */
+  const QUICKTIME_TYPES = ["video/quicktime", "video/x-quicktime", "video/mov"];
+  const contentType = (inline && QUICKTIME_TYPES.some(t => rawContentType.startsWith(t)))
+    ? "video/mp4"
+    : rawContentType;
 
   const safeFilename = filename.replace(/[^a-zA-Z0-9.\-_]/g, "_");
   const disposition  = inline
