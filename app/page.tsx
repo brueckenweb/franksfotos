@@ -212,7 +212,13 @@ async function getRootPublicAlbums() {
 }
 
 export default async function HomePage() {
-  const session = await auth();
+  // auth() in try/catch absichern – verhindert 404 bei Auth-Konfigurationsfehler
+  let session = null;
+  try {
+    session = await auth();
+  } catch (e) {
+    console.error("Auth-Fehler auf Startseite:", e);
+  }
   const rootAlbums = await getRootPublicAlbums();
 
   return (
