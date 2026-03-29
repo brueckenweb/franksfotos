@@ -156,7 +156,7 @@ if ($isRawUpload) {
     if (!$in || !$out) {
         jsonError('Konnte Datenstrom nicht öffnen', 500);
     }
-    $bytesWritten = stream_copy_to_file($in, $out);
+    $bytesWritten = stream_copy_to_stream($in, $out);
     fclose($in);
     fclose($out);
 
