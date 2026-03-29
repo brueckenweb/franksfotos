@@ -2,6 +2,11 @@
 # Diese Datei wird automatisch per GitHub Actions deployt
 
 Options -MultiViews -Indexes
+
+# DirectoryIndex deaktivieren – verhindert, dass Apache / zu /index.html umschreibt
+# BEVOR die RewriteRules laufen (was zu 404 in Next.js führen würde)
+DirectoryIndex disabled
+
 RewriteEngine On
 
 # WebSocket-Verbindungen proxyen
@@ -11,6 +16,9 @@ RewriteRule ^(.*)$ ws://127.0.0.1:3001/$1 [P,L]
 
 # Root-Pfad explizit behandeln (leerer Pfad nach DocumentRoot)
 RewriteRule ^$ http://127.0.0.1:3001/ [P,L]
+
+# Falls Apache /index.html intern anfügt, auch das als / proxyen
+RewriteRule ^index\.html$ http://127.0.0.1:3001/ [P,L]
 
 # Alle anderen Pfade zu Next.js proxyen
 RewriteRule ^(.+)$ http://127.0.0.1:3001/$1 [P,L]
