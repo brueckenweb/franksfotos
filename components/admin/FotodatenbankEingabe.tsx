@@ -528,27 +528,41 @@ export default function FotodatenbankEingabe() {
         fd.append(ext, file);
       }
 
+      // Debug: Dateigrößen loggen bevor Upload
+      let totalBytes = 0;
+      for (const [ext, file] of clientFiles.entries()) {
+        console.log(`[eintragen] Datei: ${ext} → ${(file.size / 1024 / 1024).toFixed(2)} MB`);
+        totalBytes += file.size;
+      }
+      console.log(`[eintragen] Gesamt-Upload-Größe: ${(totalBytes / 1024 / 1024).toFixed(2)} MB`);
+
       const res = await fetch("/api/fotodatenbank/eintragen", {
         method: "POST",
         body: fd, // Browser setzt Content-Type multipart/form-data automatisch
       });
 
+      console.log(`[eintragen] Server-Antwort: HTTP ${res.status} ${res.statusText}`);
+
+      // Antwort-Text immer zuerst lesen (für Debugging)
+      const rawText = await res.text();
+      console.log("[eintragen] Antwort-Body (raw):", rawText);
+
       let result: Record<string, unknown> = {};
       try {
-        result = await res.json();
+        result = JSON.parse(rawText);
       } catch {
         // Antwort war kein JSON (z.B. Apache 413 Entity Too Large)
         setSubmitError(
           `HTTP ${res.status} – ${res.statusText || "Unbekannter Fehler"} ` +
-          `(Antwort war kein JSON – möglicherweise zu große Datei)`
+          `(Antwort war kein JSON – möglicherweise zu große Datei für Apache-Proxy)`
         );
-        console.error("[eintragen] Nicht-JSON-Antwort:", res.status, res.statusText);
+        console.error("[eintragen] Nicht-JSON-Antwort! Raw:", rawText.substring(0, 500));
         return;
       }
       if (!res.ok) {
         const errMsg   = String(result.error   ?? "Fehler beim Eintragen");
         const details  = result.details ? ` – Details: ${result.details}` : "";
-        console.error("[eintragen] Server-Fehler:", result);
+        console.error("[eintragen] Server-Fehler (JSON):", result);
         setSubmitError(`${errMsg}${details}`);
         return;
       }
