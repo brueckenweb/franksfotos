@@ -533,9 +533,23 @@ export default function FotodatenbankEingabe() {
         body: fd, // Browser setzt Content-Type multipart/form-data automatisch
       });
 
-      const result = await res.json();
+      let result: Record<string, unknown> = {};
+      try {
+        result = await res.json();
+      } catch {
+        // Antwort war kein JSON (z.B. Apache 413 Entity Too Large)
+        setSubmitError(
+          `HTTP ${res.status} – ${res.statusText || "Unbekannter Fehler"} ` +
+          `(Antwort war kein JSON – möglicherweise zu große Datei)`
+        );
+        console.error("[eintragen] Nicht-JSON-Antwort:", res.status, res.statusText);
+        return;
+      }
       if (!res.ok) {
-        setSubmitError(result.error ?? "Fehler beim Eintragen");
+        const errMsg   = String(result.error   ?? "Fehler beim Eintragen");
+        const details  = result.details ? ` – Details: ${result.details}` : "";
+        console.error("[eintragen] Server-Fehler:", result);
+        setSubmitError(`${errMsg}${details}`);
         return;
       }
 

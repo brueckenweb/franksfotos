@@ -66,11 +66,32 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Kein Zugriff" }, { status: 403 });
   }
 
+  // ── Debug: Request-Infos loggen (hilft bei "Ungültige Formulardaten") ──────
+  console.log("📥 [eintragen] Request erhalten:", {
+    method:        request.method,
+    contentType:   request.headers.get("content-type"),
+    contentLength: request.headers.get("content-length"),
+    url:           request.url,
+  });
+
   let formData: FormData;
   try {
     formData = await request.formData();
-  } catch {
-    return NextResponse.json({ error: "Ungültige Formulardaten" }, { status: 400 });
+    console.log("✅ [eintragen] formData erfolgreich geparst, Felder:", [...formData.keys()]);
+  } catch (formErr) {
+    console.error("❌ [eintragen] request.formData() fehlgeschlagen:", {
+      message: formErr instanceof Error ? formErr.message : String(formErr),
+      stack:   formErr instanceof Error ? formErr.stack   : undefined,
+      contentType: request.headers.get("content-type"),
+      contentLength: request.headers.get("content-length"),
+    });
+    return NextResponse.json(
+      {
+        error:   "Ungültige Formulardaten",
+        details: formErr instanceof Error ? formErr.message : String(formErr),
+      },
+      { status: 400 }
+    );
   }
 
   const g = (key: string) => String(formData.get(key) ?? "");
