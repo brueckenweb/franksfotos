@@ -367,6 +367,26 @@ export const fdFotogruppenverkn = mysqlTable("fd_fotogruppenverkn", {
 }));
 
 // ============================================================
+// ZUGRIFFSSTATISTIK
+// ============================================================
+
+/**
+ * Seitenaufrufe – Tracking für Zugriffsstatistik
+ */
+export const pageViews = mysqlTable("page_views", {
+  id: int("id").primaryKey().autoincrement(),
+  path: varchar("path", { length: 1000 }).notNull(),
+  userId: int("user_id").references(() => users.id, { onDelete: "set null" }),
+  ipAddress: varchar("ip_address", { length: 45 }),
+  userAgent: varchar("user_agent", { length: 500 }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  pathIdx:    index("page_views_path_idx").on(table.path),
+  userIdx:    index("page_views_user_idx").on(table.userId),
+  createdIdx: index("page_views_created_idx").on(table.createdAt),
+}));
+
+// ============================================================
 // KOMMENTARE & LIKES
 // ============================================================
 

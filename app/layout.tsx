@@ -9,6 +9,7 @@ import SessionProvider from "@/components/providers/SessionProvider";
 import ConditionalShell from "@/components/providers/ConditionalShell";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
+import PageTracker from "@/components/PageTracker";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -54,6 +55,7 @@ export default async function RootLayout({
       </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen flex flex-col`}>
         <SessionProvider session={session}>
+          <PageTracker />
           <ConditionalShell header={<Header />} footer={<Footer />}>
             {children}
           </ConditionalShell>
