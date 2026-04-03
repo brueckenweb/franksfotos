@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Save, Loader2, Tag as TagIcon, Users, Lock } from "lucide-react";
+import { ArrowLeft, Save, Loader2, Tag as TagIcon, Users, Lock, ChevronDown } from "lucide-react";
 import PhotoZoom from "@/app/foto/[id]/PhotoZoom";
 import ExifBox from "@/app/foto/[id]/ExifBox";
 import AlbumTreeSelect, { AlbumOption } from "@/app/admin/alben/AlbumTreeSelect";
@@ -12,6 +12,9 @@ interface Tag {
   id: number;
   name: string;
   slug: string;
+  groupId: number | null;
+  groupName: string | null;
+  groupColor: string | null;
 }
 
 interface Group {
@@ -33,6 +36,7 @@ export default function EditFotoPage() {
   const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
   const [allGroups, setAllGroups] = useState<Group[]>([]);
   const [selectedGroupIds, setSelectedGroupIds] = useState<number[]>([]);
+  const [expandedTagGroups, setExpandedTagGroups] = useState<Set<string>>(new Set());
   const [error, setError] = useState("");
   const [photoFileUrl, setPhotoFileUrl] = useState("");
   const [photoAlt, setPhotoAlt] = useState("Vorschau");
@@ -84,7 +88,7 @@ export default function EditFotoPage() {
         }
 
         setAlbums(albumsData.albums || []);
-        setAllTags(tagsData.tags || []);
+        setAllTags(Array.isArray(tagsData) ? tagsData : (tagsData.tags ?? []));
         setAllGroups(groupsData.groups || []);
       } catch {
         setError("Foto konnte nicht geladen werden");
@@ -100,6 +104,23 @@ export default function EditFotoPage() {
       prev.includes(tagId) ? prev.filter((id) => id !== tagId) : [...prev, tagId]
     );
   }
+
+  function toggleTagGroup(groupName: string) {
+    setExpandedTagGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(groupName)) next.delete(groupName);
+      else next.add(groupName);
+      return next;
+    });
+  }
+
+  // Tags nach Gruppen gruppieren
+  const tagsByGroup = allTags.reduce<Record<string, Tag[]>>((acc, tag) => {
+    const key = tag.groupName ?? "Ohne Gruppe";
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(tag);
+    return acc;
+  }, {});
 
   function toggleGroup(groupId: number) {
     setSelectedGroupIds((prev) =>
@@ -223,39 +244,77 @@ export default function EditFotoPage() {
               />
             </div>
 
-            {/* Tags */}
+            {/* Tags – Akkordeon nach Gruppen */}
             {allTags.length > 0 && (
               <div>
                 <label className="block text-sm font-medium text-gray-300 mb-2">
                   <span className="flex items-center gap-1.5">
                     <TagIcon className="w-3.5 h-3.5" />
                     Tags
+                    {selectedTagIds.length > 0 && (
+                      <span className="ml-1 text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full px-1.5 py-0.5 font-normal">
+                        {selectedTagIds.length} ausgewählt
+                      </span>
+                    )}
                   </span>
                 </label>
-                <div className="flex flex-wrap gap-2">
-                  {allTags.map((tag) => {
-                    const active = selectedTagIds.includes(tag.id);
+                <div className="border border-gray-700 rounded-lg overflow-hidden">
+                  {Object.entries(tagsByGroup).map(([groupName, groupTags], idx, arr) => {
+                    const isOpen = expandedTagGroups.has(groupName);
+                    const selectedCount = groupTags.filter((t) =>
+                      selectedTagIds.includes(t.id)
+                    ).length;
                     return (
-                      <button
-                        key={tag.id}
-                        type="button"
-                        onClick={() => toggleTag(tag.id)}
-                        className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
-                          active
-                            ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
-                            : "bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-600"
-                        }`}
+                      <div
+                        key={groupName}
+                        className={idx < arr.length - 1 ? "border-b border-gray-700" : ""}
                       >
-                        {tag.name}
-                      </button>
+                        {/* Gruppen-Header */}
+                        <button
+                          type="button"
+                          onClick={() => toggleTagGroup(groupName)}
+                          className="w-full flex items-center justify-between px-3 py-2 hover:bg-gray-800/60 transition-colors text-left"
+                        >
+                          <span className="text-sm font-medium text-gray-300">{groupName}</span>
+                          <div className="flex items-center gap-2">
+                            {selectedCount > 0 && (
+                              <span className="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full px-1.5 py-0.5">
+                                {selectedCount}
+                              </span>
+                            )}
+                            <ChevronDown
+                              className={`w-3.5 h-3.5 text-gray-500 transition-transform duration-150 ${
+                                isOpen ? "rotate-180" : ""
+                              }`}
+                            />
+                          </div>
+                        </button>
+                        {/* Tags der Gruppe */}
+                        {isOpen && (
+                          <div className="px-3 py-2.5 flex flex-wrap gap-2 bg-gray-800/40 border-t border-gray-700">
+                            {groupTags.map((tag) => {
+                              const active = selectedTagIds.includes(tag.id);
+                              return (
+                                <button
+                                  key={tag.id}
+                                  type="button"
+                                  onClick={() => toggleTag(tag.id)}
+                                  className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
+                                    active
+                                      ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
+                                      : "bg-gray-700 border-gray-600 text-gray-400 hover:border-gray-500 hover:text-gray-300"
+                                  }`}
+                                >
+                                  {tag.name}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
-                {selectedTagIds.length > 0 && (
-                  <p className="text-xs text-gray-600 mt-1.5">
-                    {selectedTagIds.length} Tag{selectedTagIds.length !== 1 ? "s" : ""} ausgewählt
-                  </p>
-                )}
               </div>
             )}
 
