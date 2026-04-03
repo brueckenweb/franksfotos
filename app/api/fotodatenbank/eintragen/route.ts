@@ -8,6 +8,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import Busboy from "busboy";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import {
@@ -53,48 +54,80 @@ function isValidTime(s: string): boolean {
   return /^\d{2}:\d{2}:\d{2}$/.test(s);
 }
 
-// Alle bekannten Datei-Erweiterungen, die der Client hochladen kann
-const KNOWN_EXTENSIONS = [
-  "jpg", "jpeg", "dsc",
-  "cr2", "cr3", "hif", "dng", "nef", "arw", "raf",
-  "mov", "mp4", "thm",
-];
-
 export async function POST(request: NextRequest) {
   const session = await auth();
   if (!(session?.user as { isMainAdmin?: boolean })?.isMainAdmin) {
     return NextResponse.json({ error: "Kein Zugriff" }, { status: 403 });
   }
 
-  // ── Debug: Request-Infos loggen (hilft bei "Ungültige Formulardaten") ──────
-  console.log("📥 [eintragen] Request erhalten:", {
-    method:        request.method,
-    contentType:   request.headers.get("content-type"),
-    contentLength: request.headers.get("content-length"),
-    url:           request.url,
-  });
+  // ── Request-Infos loggen ──────────────────────────────────────────────────
+  const contentType   = request.headers.get("content-type")   ?? "";
+  const contentLength = request.headers.get("content-length") ?? "?";
+  console.log("📥 [eintragen] Request:", { contentType, contentLength, url: request.url });
 
-  let formData: FormData;
-  try {
-    formData = await request.formData();
-    console.log("✅ [eintragen] formData erfolgreich geparst, Felder:", [...formData.keys()]);
-  } catch (formErr) {
-    console.error("❌ [eintragen] request.formData() fehlgeschlagen:", {
-      message: formErr instanceof Error ? formErr.message : String(formErr),
-      stack:   formErr instanceof Error ? formErr.stack   : undefined,
-      contentType: request.headers.get("content-type"),
-      contentLength: request.headers.get("content-length"),
-    });
+  if (!contentType.includes("multipart/form-data")) {
     return NextResponse.json(
-      {
-        error:   "Ungültige Formulardaten",
-        details: formErr instanceof Error ? formErr.message : String(formErr),
-      },
+      { error: "Ungültiger Content-Type", details: `Erwartet: multipart/form-data, erhalten: ${contentType}` },
       { status: 400 }
     );
   }
 
-  const g = (key: string) => String(formData.get(key) ?? "");
+  // ── Multipart-Body direkt mit busboy streamen (umgeht Next.js 4MB-Limit) ──
+  const fields:        Record<string, string> = {};
+  const uploadedFiles: Record<string, Buffer> = {};
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const bb = Busboy({
+        headers: { "content-type": contentType },
+        limits:  { fileSize: 600 * 1024 * 1024 }, // 600 MB max
+      });
+
+      bb.on("field", (name: string, value: string) => {
+        fields[name] = value;
+      });
+
+      bb.on("file", (name: string, fileStream: NodeJS.ReadableStream) => {
+        const chunks: Buffer[] = [];
+        fileStream.on("data", (chunk: Buffer) => chunks.push(chunk));
+        fileStream.on("end",  () => {
+          if (chunks.length > 0) uploadedFiles[name] = Buffer.concat(chunks);
+        });
+        fileStream.on("error", reject);
+      });
+
+      bb.on("finish", resolve);
+      bb.on("error",  reject);
+
+      if (!request.body) {
+        reject(new Error("Request hat keinen Body"));
+        return;
+      }
+      // request.body ist ein Web ReadableStream → byteweise an busboy schreiben
+      const reader = request.body.getReader();
+      const pump   = async () => {
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) { bb.end(); break; }
+            bb.write(value);
+          }
+        } catch (err) {
+          reject(err);
+        }
+      };
+      pump();
+    });
+    console.log("✅ [eintragen] busboy OK – Felder:", Object.keys(fields), "| Dateien:", Object.keys(uploadedFiles));
+  } catch (parseErr) {
+    console.error("❌ [eintragen] busboy Fehler:", parseErr);
+    return NextResponse.json(
+      { error: "Fehler beim Parsen des Uploads", details: String(parseErr) },
+      { status: 400 }
+    );
+  }
+
+  const g = (key: string) => String(fields[key] ?? "");
 
   const bnummer = Number(g("bnummer"));
   if (!bnummer || isNaN(bnummer)) {
@@ -135,15 +168,6 @@ export async function POST(request: NextRequest) {
 
   let galerieTagIds: number[] = [];
   try { galerieTagIds = JSON.parse(g("galerieTagIds") || "[]"); } catch { /* leer */ }
-
-  // ── Hochgeladene Dateien einlesen ──────────────────────────────────────────
-  const uploadedFiles: Record<string, Buffer> = {};
-  for (const ext of KNOWN_EXTENSIONS) {
-    const entry = formData.get(ext);
-    if (entry instanceof File && entry.size > 0) {
-      uploadedFiles[ext] = Buffer.from(await entry.arrayBuffer());
-    }
-  }
 
   if (Object.keys(uploadedFiles).length === 0) {
     return NextResponse.json(
