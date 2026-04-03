@@ -20,6 +20,7 @@ import {
   Menu,
   X,
   Mail,
+  Database,
 } from "lucide-react";
 
 interface AdminNavProps {
@@ -66,6 +67,11 @@ const navItems = [
 ];
 
 const adminOnlyItems = [
+  {
+    label: "Fotodatenbank",
+    href: "/fotodatenbank",
+    icon: Database,
+  },
   {
     label: "Benutzer",
     href: "/admin/benutzer",

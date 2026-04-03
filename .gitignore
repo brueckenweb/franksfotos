@@ -37,3 +37,6 @@ next-env.d.ts
 
 # uploads
 /public/uploads/
+
+# database backups
+/backups/

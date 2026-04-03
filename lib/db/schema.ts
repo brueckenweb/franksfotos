@@ -15,6 +15,11 @@ import {
   index,
   primaryKey,
   uniqueIndex,
+  char,
+  date,
+  time,
+  datetime,
+  longtext,
   type AnyMySqlColumn,
 } from "drizzle-orm/mysql-core";
 import { relations } from "drizzle-orm";
@@ -120,6 +125,8 @@ export const albums = mysqlTable("albums", {
   childSortMode: varchar("child_sort_mode", { length: 10 }).default("order").notNull(), // 'order' | 'alpha' | 'alpha_desc'
   photoSortMode: varchar("photo_sort_mode", { length: 20 }).default("created_asc").notNull(), // 'created_asc' | 'created_desc' | 'title_asc' | 'title_desc' | 'filename_asc' | 'manual'
   isActive: boolean("is_active").default(true).notNull(),
+  sourceType: varchar("source_type", { length: 10 }).default("own").notNull(), // 'own' | 'tag'
+  tagId: int("tag_id").references(() => tags.id, { onDelete: "set null" }),
   createdBy: int("created_by").references(() => users.id),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
@@ -293,6 +300,73 @@ export const videoTags = mysqlTable("video_tags", {
 }));
 
 // ============================================================
+// LEGACY FOTODATENBANK (fd_*)
+// ============================================================
+
+/**
+ * Haupttabelle der alten Fotodatenbank
+ * bnummer = Primärschlüssel (kein auto_increment – wird manuell vergeben)
+ */
+export const fdFotodatenbank = mysqlTable("fd_fotodatenbank", {
+  bnummer:          bigint("bnummer", { mode: "number" }).primaryKey(),
+  land:             varchar("land", { length: 255 }).notNull().default(""),
+  ort:              varchar("ort", { length: 255 }).notNull().default(""),
+  titel:            varchar("titel", { length: 255 }).notNull().default(""),
+  bdatum:           varchar("bdatum", { length: 20 }).notNull().default(""),
+  aufnahmedatum:    date("aufnahmedatum").notNull(),
+  aufnahmezeit:     time("aufnahmezeit").notNull(),
+  bnegativnr:       varchar("bnegativnr", { length: 10 }).notNull().default(""),
+  bart:             char("bart", { length: 3 }).notNull().default(""),
+  pfad:             varchar("pfad", { length: 255 }).notNull().default(""),
+  gpsB:             varchar("gps_b", { length: 50 }).notNull(),
+  gpsL:             varchar("gps_l", { length: 50 }).notNull(),
+  gpsH:             varchar("gps_h", { length: 50 }).notNull(),
+  gpsDatum:         varchar("gps_datum", { length: 50 }).notNull(),
+  kamera:           varchar("kamera", { length: 100 }).notNull().default(""),
+  blende:           varchar("blende", { length: 20 }).notNull().default(""),
+  belichtungsdauer: varchar("belichtungsdauer", { length: 50 }).notNull().default(""),
+  brennweite:       varchar("brennweite", { length: 20 }).notNull().default(""),
+  iso:              varchar("iso", { length: 10 }).notNull().default(""),
+  fotograf:         varchar("fotograf", { length: 255 }).notNull().default(""),
+  bas:              varchar("bas", { length: 20 }).notNull().default("0"),
+  eingetragen:      date("eingetragen").notNull(),
+});
+
+/**
+ * Fotogruppen der alten Fotodatenbank
+ */
+export const fdFotogruppen = mysqlTable("fd_fotogruppen", {
+  idfgruppe:       bigint("idfgruppe", { mode: "number" }).primaryKey().autoincrement(),
+  name:            varchar("name", { length: 255 }).notNull(),
+  beschreibung:    longtext("beschreibung").notNull(),
+  adatum:          date("adatum").notNull(),
+  edatum:          date("edatum").notNull(),
+  einaktiv:        varchar("einaktiv", { length: 10 }).notNull().default("nein"),
+  bartAlt:         bigint("bart_alt", { mode: "number" }).notNull(),
+  routendatenHtml: varchar("routendaten_html", { length: 255 }).notNull(),
+  routendatenTk2:  varchar("routendaten_tk2", { length: 255 }).notNull(),
+  routendatenKmz:  varchar("routendaten_kmz", { length: 255 }).notNull(),
+  eingetragen:     date("eingetragen").notNull(),
+  anzahl:          int("anzahl").notNull().default(0),
+});
+
+/**
+ * Verknüpfungstabelle: Fotos ↔ Fotogruppen (Legacy)
+ */
+export const fdFotogruppenverkn = mysqlTable("fd_fotogruppenverkn", {
+  idverkn:    bigint("idverkn", { mode: "number" }).primaryKey().autoincrement(),
+  bnummer:    bigint("bnummer", { mode: "number" }).notNull()
+                .references(() => fdFotodatenbank.bnummer, { onDelete: "cascade" }),
+  idfgruppe:  bigint("idfgruppe", { mode: "number" }).notNull()
+                .references(() => fdFotogruppen.idfgruppe, { onDelete: "cascade" }),
+  fotogruppe: varchar("fotogruppe", { length: 255 }).notNull(),
+  eingetragen: datetime("eingetragen").notNull(),
+}, (table) => ({
+  bnummerIdx:   index("fd_verkn_bnummer_idx").on(table.bnummer),
+  idfgruppeIdx: index("fd_verkn_idfgruppe_idx").on(table.idfgruppe),
+}));
+
+// ============================================================
 // KOMMENTARE & LIKES
 // ============================================================
 
@@ -402,6 +476,49 @@ export const likesRelations = relations(likes, ({ one }) => ({
   user: one(users, { fields: [likes.userId], references: [users.id] }),
 }));
 
+export const fdFotodatenbankRelations = relations(fdFotodatenbank, ({ many }) => ({
+  verknuepfungen: many(fdFotogruppenverkn),
+}));
+
+export const fdFotogruppenRelations = relations(fdFotogruppen, ({ many }) => ({
+  verknuepfungen: many(fdFotogruppenverkn),
+}));
+
+export const fdFotogruppenverknRelations = relations(fdFotogruppenverkn, ({ one }) => ({
+  foto:      one(fdFotodatenbank, { fields: [fdFotogruppenverkn.bnummer],   references: [fdFotodatenbank.bnummer] }),
+  fgruppe:   one(fdFotogruppen,   { fields: [fdFotogruppenverkn.idfgruppe], references: [fdFotogruppen.idfgruppe] }),
+}));
+
+// ============================================================
+// BAS – BRÜCKENDATENBANK (Legacy, Read für Dropdown)
+// ============================================================
+
+/**
+ * BAS – Brücken-Stammblätter (für Dropdown-Auswahl in der Fotodatenbank-Eingabe)
+ */
+export const fdBas = mysqlTable("bas", {
+  ubasId:         int("ubas_id").primaryKey().autoincrement(),
+  brueckennummer: varchar("brueckennummer", { length: 20 }).notNull().default(""),
+  name:           varchar("name", { length: 255 }).notNull().default(""),
+});
+
+/**
+ * BAS-Bilder – Verknüpfung Foto → Brücke (Brückenweb)
+ */
+export const fdBasbilder = mysqlTable("basbilder", {
+  id:             int("id").primaryKey().autoincrement(),
+  brueckennummer: varchar("brueckennummer", { length: 20 }).notNull(),
+  path:           varchar("path", { length: 255 }).notNull().default(""),
+  link:           varchar("link", { length: 255 }).notNull().default(""),
+  reihenfolge:    int("reihenfolge").notNull().default(5),
+  rechte:         varchar("rechte", { length: 255 }).notNull().default(""),
+  datum:          varchar("datum", { length: 20 }).notNull().default(""),
+  titel:          varchar("titel", { length: 255 }).notNull().default(""),
+  nutzid:         int("nutzid").notNull().default(3),
+  mid:            int("mid").notNull().default(1),
+  eingetragen:    date("eingetragen").notNull(),
+});
+
 // ============================================================
 // TYPE EXPORTS
 // ============================================================
@@ -422,3 +539,14 @@ export type NewTag = typeof tags.$inferInsert;
 export type Comment = typeof comments.$inferSelect;
 export type NewComment = typeof comments.$inferInsert;
 export type Like = typeof likes.$inferSelect;
+// Legacy Fotodatenbank
+export type FdFotodatenbank    = typeof fdFotodatenbank.$inferSelect;
+export type NewFdFotodatenbank = typeof fdFotodatenbank.$inferInsert;
+export type FdFotogruppe       = typeof fdFotogruppen.$inferSelect;
+export type NewFdFotogruppe    = typeof fdFotogruppen.$inferInsert;
+export type FdFotogruppenverkn    = typeof fdFotogruppenverkn.$inferSelect;
+export type NewFdFotogruppenverkn = typeof fdFotogruppenverkn.$inferInsert;
+// BAS
+export type FdBas        = typeof fdBas.$inferSelect;
+export type FdBasbild    = typeof fdBasbilder.$inferSelect;
+export type NewFdBasbild = typeof fdBasbilder.$inferInsert;

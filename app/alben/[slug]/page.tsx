@@ -10,6 +10,8 @@ import {
   videos,
   photoGroupVisibility,
   photoUserAccess,
+  photoTags,
+  tags,
 } from "@/lib/db/schema";
 import { eq, and, inArray, count, or, asc, desc, type SQL } from "drizzle-orm";
 import {
@@ -20,6 +22,7 @@ import {
   ChevronRight,
   Upload,
   Pencil,
+  Tag,
 } from "lucide-react";
 import DownloadButton from "./DownloadButton";
 import PhotoThumbnail from "./PhotoThumbnail";
@@ -426,6 +429,60 @@ async function getAlbumPhotos(
   }
 }
 
+/** Alle Fotos eines Tags laden (für Tag-Alben) */
+async function getTagPhotos(
+  tagId: number,
+  isAdmin = false,
+  sortMode = "created_asc"
+) {
+  const orderBy = buildPhotoOrder(sortMode);
+  try {
+    // Alle photo-IDs mit diesem Tag holen
+    const taggedRows = await db
+      .select({ photoId: photoTags.photoId })
+      .from(photoTags)
+      .where(eq(photoTags.tagId, tagId));
+
+    const taggedIds = taggedRows.map((r) => r.photoId);
+    if (taggedIds.length === 0) return [];
+
+    const whereCondition = isAdmin
+      ? inArray(photos.id, taggedIds)
+      : and(inArray(photos.id, taggedIds), eq(photos.isPrivate, false));
+
+    return await db
+      .select({
+        id: photos.id,
+        filename: photos.filename,
+        title: photos.title,
+        fileUrl: photos.fileUrl,
+        thumbnailUrl: photos.thumbnailUrl,
+        isPrivate: photos.isPrivate,
+        width: photos.width,
+        height: photos.height,
+      })
+      .from(photos)
+      .where(whereCondition)
+      .orderBy(...orderBy);
+  } catch {
+    return [];
+  }
+}
+
+/** Tag-Name für Anzeige laden */
+async function getTagName(tagId: number): Promise<string | null> {
+  try {
+    const result = await db
+      .select({ name: tags.name })
+      .from(tags)
+      .where(eq(tags.id, tagId))
+      .limit(1);
+    return result[0]?.name ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function getCoverPhoto(coverPhotoId: number) {
   try {
     const result = await db
@@ -494,12 +551,17 @@ export default async function AlbumPage({ params }: Props) {
   // Eltern-Album für Breadcrumb
   const parentAlbum = album.parentId ? await getAlbumById(album.parentId) : null;
 
-  // Unteralben + Medien + Cover parallel laden
-  const [childAlbums, albumPhotos, albumVideos, coverPhoto] = await Promise.all([
+  const isTagAlbum = album.sourceType === "tag" && !!album.tagId;
+
+  // Unteralben + Medien + Cover + ggf. Tag-Name parallel laden
+  const [childAlbums, albumPhotos, albumVideos, coverPhoto, tagName] = await Promise.all([
     getAccessibleChildAlbums(album.id, userGroupSlugs, album.childSortMode ?? "order", isAdmin),
-    getAlbumPhotos(album.id, isAdmin, userId, userGroupSlugs, album.photoSortMode ?? "created_asc"),
+    isTagAlbum
+      ? getTagPhotos(album.tagId!, isAdmin, album.photoSortMode ?? "created_asc")
+      : getAlbumPhotos(album.id, isAdmin, userId, userGroupSlugs, album.photoSortMode ?? "created_asc"),
     getAlbumVideos(album.id),
     album.coverPhotoId ? getCoverPhoto(album.coverPhotoId) : Promise.resolve(null),
+    isTagAlbum ? getTagName(album.tagId!) : Promise.resolve(null),
   ]);
 
   const totalMedia = albumPhotos.length + albumVideos.length;
@@ -577,6 +639,19 @@ export default async function AlbumPage({ params }: Props) {
             thumbnailUrl={coverPhoto.thumbnailUrl}
             alt={album.name}
           />
+        )}
+
+        {/* Tag-Badge (bei Tag-Alben) */}
+        {isTagAlbum && tagName && (
+          <div className="flex items-center gap-2 mb-4">
+            <span className="inline-flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-medium px-3 py-1.5 rounded-full">
+              <Tag className="w-3 h-3" />
+              Tag: {tagName}
+            </span>
+            <span className="text-gray-600 text-xs">
+              {albumPhotos.length} Foto{albumPhotos.length !== 1 ? "s" : ""} mit diesem Tag
+            </span>
+          </div>
         )}
 
         {/* Album-Beschreibung */}

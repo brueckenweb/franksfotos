@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Film, Play } from "lucide-react";
+import { Film, Play, Clock, Lock } from "lucide-react";
 import DeleteVideoButton from "./DeleteVideoButton";
 import GenerateThumbnailButton from "./GenerateThumbnailButton";
 
@@ -21,14 +21,41 @@ export interface VideoRow {
 }
 
 function formatDuration(seconds: number | null): string {
-  if (!seconds) return "–";
+  if (!seconds) return "";
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
   return `${m}:${s.toString().padStart(2, "0")}`;
 }
 
+function VideoThumb({
+  thumbnailUrl,
+  alt,
+}: {
+  thumbnailUrl: string | null;
+  alt: string;
+}) {
+  const [failed, setFailed] = useState(false);
+
+  if (!thumbnailUrl || failed) {
+    return (
+      <div className="w-full h-full flex items-center justify-center bg-gray-800">
+        <Film className="w-8 h-8 text-gray-600" />
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={thumbnailUrl}
+      alt={alt}
+      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+      loading="lazy"
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
 export default function VideoTableClient({ initialVideos }: { initialVideos: VideoRow[] }) {
-  // Thumbnail-URLs lokal verwalten, damit nach Generierung kein Seiten-Reload nötig ist
   const [thumbUrls, setThumbUrls] = useState<Record<number, string>>(() => {
     const map: Record<number, string> = {};
     for (const v of initialVideos) {
@@ -37,110 +64,99 @@ export default function VideoTableClient({ initialVideos }: { initialVideos: Vid
     return map;
   });
 
-  // Tracks welche Thumbnails einen Ladefehler haben (404, falscher Pfad, etc.)
-  const [thumbErrors, setThumbErrors] = useState<Record<number, boolean>>({});
+  if (initialVideos.length === 0) {
+    return (
+      <div className="text-center py-16 bg-gray-900 border border-gray-800 rounded-xl">
+        <Film className="w-12 h-12 text-gray-600 mx-auto mb-3" />
+        <p className="text-gray-400">Noch keine Videos vorhanden.</p>
+      </div>
+    );
+  }
 
   return (
-    <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="border-b border-gray-800">
-            <th className="text-left px-4 py-3 text-gray-400 font-medium">Video</th>
-            <th className="text-left px-4 py-3 text-gray-400 font-medium hidden md:table-cell">Album</th>
-            <th className="text-left px-4 py-3 text-gray-400 font-medium hidden lg:table-cell">Dauer</th>
-            <th className="text-left px-4 py-3 text-gray-400 font-medium hidden lg:table-cell">Größe</th>
-            <th className="text-center px-4 py-3 text-gray-400 font-medium">Status</th>
-            <th className="text-right px-4 py-3 text-gray-400 font-medium">Aktionen</th>
-          </tr>
-        </thead>
-        <tbody>
-          {initialVideos.map((video) => {
-            const thumbUrl = thumbUrls[video.id] ?? null;
-            // Thumbnail gilt als vorhanden, wenn URL gesetzt UND kein Ladefehler
-            const thumbOk = Boolean(thumbUrl) && !thumbErrors[video.id];
+    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+      {initialVideos.map((video) => {
+        const thumbUrl = thumbUrls[video.id] ?? null;
+        const duration = formatDuration(video.duration);
 
-            return (
-              <tr
-                key={video.id}
-                className="border-b border-gray-800/50 hover:bg-gray-800/30 transition-colors"
+        return (
+          <div
+            key={video.id}
+            className="group relative bg-gray-900 border border-gray-800 rounded-lg overflow-hidden hover:border-gray-700 transition-colors"
+          >
+            {/* Vorschaubild */}
+            <div className="aspect-video bg-gray-800 relative overflow-hidden">
+              <VideoThumb
+                thumbnailUrl={thumbUrl}
+                alt={video.title || video.filename}
+              />
+
+              {/* Play-Overlay mit Link */}
+              <a
+                href={video.fileUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="absolute inset-0 flex items-center justify-center bg-black/0 group-hover:bg-black/50 transition-colors"
+                title="Video öffnen"
               >
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-3">
-                    {/* Thumbnail-Vorschau */}
-                    <div className="w-14 h-10 bg-gray-800 rounded overflow-hidden flex-shrink-0 relative">
-                      {thumbUrl ? (
-                        <img
-                          src={thumbUrl}
-                          alt={video.title || video.filename}
-                          className={`w-full h-full object-cover ${thumbErrors[video.id] ? "hidden" : ""}`}
-                          onError={() =>
-                            setThumbErrors((prev) => ({ ...prev, [video.id]: true }))
-                          }
-                        />
-                      ) : null}
-                      {!thumbOk && (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <Film className="w-5 h-5 text-gray-600" />
-                        </div>
-                      )}
-                      <div className="absolute inset-0 flex items-center justify-center">
-                        <Play className="w-4 h-4 text-white/70" />
-                      </div>
-                    </div>
+                <div className="bg-white/20 group-hover:bg-white/30 backdrop-blur-sm rounded-full p-3 opacity-0 group-hover:opacity-100 transition-all scale-75 group-hover:scale-100">
+                  <Play className="w-6 h-6 text-white fill-white" />
+                </div>
+              </a>
 
-                    <div className="min-w-0">
-                      <p className="text-white font-medium truncate">
-                        {video.title || video.filename}
-                      </p>
-                      {video.mimeType && (
-                        <p className="text-gray-600 text-xs font-mono">{video.mimeType}</p>
-                      )}
-                      {/* Button zeigen wenn kein Thumbnail oder Ladefehler */}
-                      {!thumbOk && (
-                        <GenerateThumbnailButton
-                          videoId={video.id}
-                          fileUrl={video.fileUrl}
-                          filename={video.filename}
-                          albumSlug={video.albumSlug}
-                          onDone={(url) => {
-                            setThumbUrls((prev) => ({ ...prev, [video.id]: url }));
-                            setThumbErrors((prev) => ({ ...prev, [video.id]: false }));
-                          }}
-                        />
-                      )}
-                    </div>
-                  </div>
-                </td>
-                <td className="px-4 py-3 hidden md:table-cell text-gray-400">
-                  {video.albumName || "–"}
-                </td>
-                <td className="px-4 py-3 hidden lg:table-cell text-gray-400">
-                  {formatDuration(video.duration)}
-                </td>
-                <td className="px-4 py-3 hidden lg:table-cell text-gray-400">
-                  {video.fileSize
-                    ? `${(video.fileSize / (1024 * 1024)).toFixed(1)} MB`
-                    : "–"}
-                </td>
-                <td className="px-4 py-3 text-center">
-                  {video.isPrivate ? (
-                    <span className="inline-flex items-center gap-1 text-amber-400 text-xs">
-                      Privat
-                    </span>
-                  ) : (
-                    <span className="text-gray-500 text-xs">Öffentlich</span>
-                  )}
-                </td>
-                <td className="px-4 py-3">
-                  <div className="flex items-center justify-end">
-                    <DeleteVideoButton videoId={video.id} />
-                  </div>
-                </td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
+              {/* Dauer-Badge */}
+              {duration && (
+                <div className="absolute bottom-1.5 right-1.5 bg-black/70 rounded px-1.5 py-0.5 flex items-center gap-1 pointer-events-none">
+                  <Clock className="w-2.5 h-2.5 text-gray-300" />
+                  <span className="text-xs text-gray-200 font-mono">{duration}</span>
+                </div>
+              )}
+
+              {/* Privat-Badge */}
+              {video.isPrivate && (
+                <div className="absolute top-1.5 left-1.5 bg-black/70 rounded-full p-1 pointer-events-none">
+                  <Lock className="w-3 h-3 text-amber-400" />
+                </div>
+              )}
+
+              {/* Aktionen (Löschen) */}
+              <div className="absolute top-1.5 right-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-10">
+                <DeleteVideoButton videoId={video.id} />
+              </div>
+            </div>
+
+            {/* Info */}
+            <div className="p-2">
+              <p className="text-xs text-gray-300 truncate font-medium">
+                {video.title || video.filename}
+              </p>
+              {video.albumName && (
+                <p className="text-xs text-gray-600 truncate">{video.albumName}</p>
+              )}
+              <div className="flex items-center justify-between mt-1">
+                {video.fileSize ? (
+                  <p className="text-xs text-gray-700">
+                    {(video.fileSize / (1024 * 1024)).toFixed(1)} MB
+                  </p>
+                ) : <span />}
+
+                {/* Thumbnail generieren wenn keines vorhanden */}
+                {!thumbUrl && (
+                  <GenerateThumbnailButton
+                    videoId={video.id}
+                    fileUrl={video.fileUrl}
+                    filename={video.filename}
+                    albumSlug={video.albumSlug}
+                    onDone={(url) => {
+                      setThumbUrls((prev) => ({ ...prev, [video.id]: url }));
+                    }}
+                  />
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

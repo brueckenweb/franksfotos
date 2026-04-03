@@ -55,10 +55,10 @@ export const UPLOAD_CONFIG: UploadConfig = {
       requiresPermission: "upload_photos",
     },
 
-    // Videos
+    // Videos (kein thumbnailPath – Thumbnails werden client-seitig generiert
+    // und separat mit target "videoThumbnails" hochgeladen)
     videos: {
       remote: `${BASE_URL}/videos/`,
-      thumbnailPath: `${BASE_URL}/video-thumbs/`,
       maxSize: 500 * 1024 * 1024, // 500MB
       allowedTypes: [
         "video/mp4",

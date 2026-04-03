@@ -59,7 +59,7 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json();
-    const { name, slug, description, parentId, sortOrder, childSortMode, photoSortMode, visibleForGroups } = body;
+    const { name, slug, description, parentId, sortOrder, childSortMode, photoSortMode, visibleForGroups, sourceType, tagId } = body;
 
     if (!name || !slug) {
       return NextResponse.json({ error: "Name und Slug sind erforderlich" }, { status: 400 });
@@ -69,6 +69,8 @@ export async function POST(request: NextRequest) {
     const safePhotoSortMode = validPhotoSortModes.includes(photoSortMode) ? photoSortMode : "created_asc";
 
     const userId = parseInt((session.user as { id: string }).id);
+
+    const safeSourceType = sourceType === "tag" ? "tag" : "own";
 
     const [inserted] = await db
       .insert(albums)
@@ -81,6 +83,8 @@ export async function POST(request: NextRequest) {
         childSortMode: ["alpha", "alpha_desc"].includes(childSortMode) ? childSortMode : "order",
         photoSortMode: safePhotoSortMode,
         isActive: true,
+        sourceType: safeSourceType,
+        tagId: safeSourceType === "tag" && tagId ? parseInt(tagId) : null,
         createdBy: userId,
       })
       .$returningId();

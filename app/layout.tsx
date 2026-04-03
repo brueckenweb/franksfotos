@@ -6,6 +6,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { auth } from "@/auth";
 import SessionProvider from "@/components/providers/SessionProvider";
+import ConditionalShell from "@/components/providers/ConditionalShell";
 import Header from "@/components/Header";
 import Footer from "@/components/Footer";
 
@@ -25,10 +26,15 @@ export const metadata: Metadata = {
     template: "%s – FranksFotos",
   },
   description: "Franks persönliche Fotogalerie",
+  icons: {
+    icon: "/logoFF.png",
+    apple: "/logoFF.png",
+  },
   openGraph: {
     title: "FranksFotos",
     description: "Franks persönliche Fotogalerie",
     type: "website",
+    images: [{ url: "/logoFF.png" }],
   },
 };
 
@@ -41,13 +47,16 @@ export default async function RootLayout({
 
   return (
     <html lang="de" data-scroll-behavior="smooth">
+      <head>
+        <link rel="icon" type="image/png" href="/logoFF.png" />
+        <link rel="apple-touch-icon" href="/logoFF.png" />
+        <link rel="shortcut icon" type="image/png" href="/logoFF.png" />
+      </head>
       <body className={`${geistSans.variable} ${geistMono.variable} antialiased min-h-screen flex flex-col`}>
         <SessionProvider session={session}>
-          <Header />
-          <main className="flex-1">
+          <ConditionalShell header={<Header />} footer={<Footer />}>
             {children}
-          </main>
-          <Footer />
+          </ConditionalShell>
         </SessionProvider>
       </body>
     </html>

@@ -3,15 +3,19 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Save, Loader2, Upload } from "lucide-react";
+import { ArrowLeft, Save, Loader2, Upload, Tag } from "lucide-react";
 import AlbumTreeSelect from "../AlbumTreeSelect";
 import type { AlbumOption } from "../AlbumTreeSelect";
+import TagGroupSelect from "../TagGroupSelect";
+import type { TagOption } from "../TagGroupSelect";
 
 export default function NeuesAlbumPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [albums, setAlbums] = useState<AlbumOption[]>([]);
+  const [availableTags, setAvailableTags] = useState<TagOption[]>([]);
+  const [tagsLoading, setTagsLoading] = useState(false);
 
   const [form, setForm] = useState({
     name: "",
@@ -24,6 +28,8 @@ export default function NeuesAlbumPage() {
     visibleForPublic: true,
     visibleForUser: false,
     visibleForFamilie: false,
+    sourceType: "own" as "own" | "tag",
+    tagId: "",
   });
 
   // Alle vorhandenen Alben für das Übergeordnet-Dropdown laden
@@ -31,9 +37,17 @@ export default function NeuesAlbumPage() {
     fetch("/api/albums")
       .then((r) => r.json())
       .then((data) => setAlbums(data.albums ?? []))
-      .catch(() => {
-        /* ignorieren */
-      });
+      .catch(() => {});
+  }, []);
+
+  // Tags laden
+  useEffect(() => {
+    setTagsLoading(true);
+    fetch("/api/tags")
+      .then((r) => r.json())
+      .then((data) => setAvailableTags(Array.isArray(data) ? data : (data.tags ?? [])))
+      .catch(() => {})
+      .finally(() => setTagsLoading(false));
   }, []);
 
   function generateSlug(name: string) {
@@ -75,6 +89,8 @@ export default function NeuesAlbumPage() {
           childSortMode: form.childSortMode,
           photoSortMode: form.photoSortMode,
           visibleForGroups,
+          sourceType: form.sourceType,
+          tagId: form.sourceType === "tag" && form.tagId ? parseInt(form.tagId) : null,
         }),
       });
 
@@ -158,7 +174,7 @@ export default function NeuesAlbumPage() {
           </div>
         </div>
 
-        {/* Übergeordnetes Album – einklappbares Baummenü */}
+        {/* Übergeordnetes Album */}
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-1.5">
             Übergeordnetes Album
@@ -185,6 +201,76 @@ export default function NeuesAlbumPage() {
             placeholder="Optionale Beschreibung..."
             className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500 placeholder-gray-600 resize-none"
           />
+        </div>
+
+        {/* ── Fotoquelle ─────────────────────────────────────────────── */}
+        <div className="border border-gray-700 rounded-xl p-4 space-y-4">
+          <label className="block text-sm font-semibold text-gray-200 flex items-center gap-2">
+            <Tag className="w-4 h-4 text-amber-400" />
+            Fotoquelle
+          </label>
+
+          {/* Radio-Auswahl */}
+          <div className="space-y-2">
+            <label className="flex items-start gap-3 cursor-pointer group">
+              <input
+                type="radio"
+                name="sourceType"
+                value="own"
+                checked={form.sourceType === "own"}
+                onChange={() => setForm((p) => ({ ...p, sourceType: "own", tagId: "" }))}
+                className="mt-0.5 w-4 h-4 border-gray-600 bg-gray-800 text-amber-500 focus:ring-amber-500"
+              />
+              <div>
+                <span className="text-gray-200 text-sm font-medium">Eigene Fotos</span>
+                <p className="text-gray-500 text-xs mt-0.5">
+                  Fotos werden diesem Album direkt zugewiesen (über Upload oder manuell).
+                </p>
+              </div>
+            </label>
+
+            <label className="flex items-start gap-3 cursor-pointer group">
+              <input
+                type="radio"
+                name="sourceType"
+                value="tag"
+                checked={form.sourceType === "tag"}
+                onChange={() => setForm((p) => ({ ...p, sourceType: "tag" }))}
+                className="mt-0.5 w-4 h-4 border-gray-600 bg-gray-800 text-amber-500 focus:ring-amber-500"
+              />
+              <div>
+                <span className="text-gray-200 text-sm font-medium">Tag-Fotos</span>
+                <p className="text-gray-500 text-xs mt-0.5">
+                  Das Album zeigt dynamisch alle Fotos, die mit einem bestimmten Tag versehen sind.
+                </p>
+              </div>
+            </label>
+          </div>
+
+          {/* Tag-Auswahl (nur bei sourceType === "tag") */}
+          {form.sourceType === "tag" && (
+            <div>
+              <label className="block text-sm font-medium text-gray-300 mb-1.5">
+                Tag auswählen <span className="text-red-400">*</span>
+              </label>
+              {tagsLoading ? (
+                <div className="flex items-center gap-2 text-gray-500 text-sm py-2">
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  Tags werden geladen…
+                </div>
+              ) : availableTags.length === 0 ? (
+                <p className="text-gray-500 text-sm">
+                  Keine Tags vorhanden. Bitte zuerst Tags anlegen.
+                </p>
+              ) : (
+                <TagGroupSelect
+                  tags={availableTags}
+                  value={form.tagId}
+                  onChange={(val) => setForm((p) => ({ ...p, tagId: val }))}
+                />
+              )}
+            </div>
+          )}
         </div>
 
         {/* Sortierung */}
@@ -225,9 +311,6 @@ export default function NeuesAlbumPage() {
               </label>
             ))}
           </div>
-          <p className="text-gray-500 text-xs mt-1">
-            Legt fest, wie direkte Unteralben dieses Albums sortiert werden.
-          </p>
         </div>
 
         {/* Sortierung der Fotos */}
@@ -257,9 +340,6 @@ export default function NeuesAlbumPage() {
               </label>
             ))}
           </div>
-          <p className="text-gray-500 text-xs mt-1">
-            Legt fest, in welcher Reihenfolge die Fotos im Album angezeigt werden.
-          </p>
         </div>
 
         {/* Sichtbarkeit */}
@@ -299,23 +379,25 @@ export default function NeuesAlbumPage() {
             )}
             Album speichern
           </button>
-          <button
-            type="button"
-            disabled={loading}
-            onClick={(e) => {
-              const form = (e.target as HTMLElement).closest("form") as HTMLFormElement;
-              if (!form.reportValidity()) return;
-              saveAlbum(true);
-            }}
-            className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
-          >
-            {loading ? (
-              <Loader2 className="w-4 h-4 animate-spin" />
-            ) : (
-              <Upload className="w-4 h-4" />
-            )}
-            Speichern &amp; Fotos eingeben
-          </button>
+          {form.sourceType === "own" && (
+            <button
+              type="button"
+              disabled={loading}
+              onClick={(e) => {
+                const formEl = (e.target as HTMLElement).closest("form") as HTMLFormElement;
+                if (!formEl.reportValidity()) return;
+                saveAlbum(true);
+              }}
+              className="flex items-center gap-2 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors"
+            >
+              {loading ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Upload className="w-4 h-4" />
+              )}
+              Speichern &amp; Fotos eingeben
+            </button>
+          )}
           <Link
             href="/admin/alben"
             className="text-gray-400 hover:text-white text-sm transition-colors"

@@ -2,7 +2,8 @@ import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { photos, videos, albums, users, comments } from "@/lib/db/schema";
 import { count } from "drizzle-orm";
-import { Camera, Film, FolderOpen, Users, MessageSquare, TrendingUp } from "lucide-react";
+import { Camera, Film, FolderOpen, Users, MessageSquare, TrendingUp, Database } from "lucide-react";
+import DatabaseBackupPanel from "@/components/admin/DatabaseBackupPanel";
 
 async function getStats() {
   try {
@@ -71,6 +72,8 @@ export default async function AdminDashboard() {
     },
   ];
 
+  const isMainAdmin = !!(session?.user as { isMainAdmin?: boolean })?.isMainAdmin;
+
   return (
     <div>
       {/* Header */}
@@ -105,7 +108,7 @@ export default async function AdminDashboard() {
         })}
       </div>
 
-      {/* Schnellzugriff */}
+      {/* Schnellzugriff & Datenbank-Backup */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
           <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
@@ -134,28 +137,19 @@ export default async function AdminDashboard() {
               <Users className="w-4 h-4" />
               Neuen Benutzer anlegen
             </a>
+            {isMainAdmin && (
+              <a
+                href="/fotodatenbank"
+                className="flex items-center gap-3 text-gray-300 hover:text-amber-400 hover:bg-gray-800 rounded-lg px-3 py-2 transition-colors"
+              >
+                <Database className="w-4 h-4" />
+                Fotodatenbank Eingabe
+              </a>
+            )}
           </div>
         </div>
 
-        <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
-          <h2 className="text-lg font-semibold text-white mb-4">
-            ℹ️ System-Info
-          </h2>
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span className="text-gray-400">Upload-Domain:</span>
-              <span className="text-gray-300 font-mono text-xs">pics.frank-sellke.de</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-400">Next.js Version:</span>
-              <span className="text-gray-300">16.x</span>
-            </div>
-            <div className="flex justify-between">
-              <span className="text-gray-400">Datenbank:</span>
-              <span className="text-gray-300">MariaDB</span>
-            </div>
-          </div>
-        </div>
+        <DatabaseBackupPanel />
       </div>
     </div>
   );
