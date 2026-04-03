@@ -1,0 +1,13 @@
+{
+  "name": "fotodatenbank-prozessor",
+  "version": "1.0.0",
+  "description": "Lokaler Fotodatenbank-Prozessor – läuft auf localhost:4567",
+  "type": "module",
+  "scripts": {
+    "start": "node local-fotodatenbank.mjs"
+  },
+  "dependencies": {
+    "exifr": "^7.1.3",
+    "sharp": "^0.34.5"
+  }
+}

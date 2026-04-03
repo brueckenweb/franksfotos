@@ -40,3 +40,6 @@ next-env.d.ts
 
 # database backups
 /backups/
+
+# Lokale Fotodatenbank-Konfiguration (PC-spezifisch, nicht einchecken)
+scripts/local-config.json

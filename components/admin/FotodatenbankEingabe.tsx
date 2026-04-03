@@ -135,15 +135,15 @@ const EMPTY_EXIF: ExifData = {
   gpsBreite: 0, gpsLaenge: 0, gpsHoehe: 0, gpsRichtung: -1, bdatum: "",
 };
 
+// URL des lokalen Prozessors (läuft auf dem PC des Benutzers)
+const LOCAL_SERVER = "http://localhost:4567";
+
 // ─── Hauptkomponente ──────────────────────────────────────────────────────────
 
 export default function FotodatenbankEingabe() {
-  // ── File System Access API State ──
-  const [dirHandle,          setDirHandle]          = useState<FileSystemDirectoryHandle | null>(null);
-  const [clientFiles,        setClientFiles]        = useState<Map<string, File>>(new Map());
-  const [origNamesToDelete,  setOrigNamesToDelete]  = useState<string[]>([]);
+  // ── Lokaler Server State ──
+  const [localServerStatus, setLocalServerStatus] = useState<"checking" | "ok" | "error">("checking");
   const [anzahlZuVerarbeiten, setAnzahlZuVerarbeiten] = useState(0);
-  const previewUrlRef = useRef<string | null>(null);
   const [previewUrl,  setPreviewUrl]  = useState<string | null>(null);
 
   // ── UI State ──
@@ -186,179 +186,53 @@ export default function FotodatenbankEingabe() {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
-  // ── Cleanup Blob-URL bei Unmount ──
-  useEffect(() => {
-    return () => {
-      if (previewUrlRef.current) URL.revokeObjectURL(previewUrlRef.current);
-    };
-  }, []);
-
-  // ── Nächstes Bild client-seitig scannen ───────────────────────────────────
+  // ── Nächstes Bild via lokalen Server scannen ──────────────────────────────
   const scanNaechstesBild = useCallback(async () => {
-    if (!dirHandle) return;
-
     setLoading(true);
     setScanError(null);
     setSubmitError(null);
     setSuccessMsg(null);
     setLeer(false);
     setScanData(null);
-
-    // Alte Blob-URL freigeben
-    if (previewUrlRef.current) {
-      URL.revokeObjectURL(previewUrlRef.current);
-      previewUrlRef.current = null;
-      setPreviewUrl(null);
-    }
+    setPreviewUrl(null);
 
     try {
-      // 1. Alle Dateien im Verzeichnis einlesen
-      const allEntries: Array<{ name: string; handle: FileSystemFileHandle }> = [];
-      const dirIterable = (dirHandle as unknown as {
-        entries(): AsyncIterableIterator<[string, FileSystemHandle]>;
-      }).entries();
-      for await (const [name, handle] of dirIterable) {
-        if (
-          handle.kind === "file" &&
-          name !== "Thumbs.db" &&
-          !name.startsWith(".")
-        ) {
-          allEntries.push({ name, handle: handle as FileSystemFileHandle });
-        }
+      // 1. Lokaler Server: Ordner scannen + EXIF
+      const localRes = await fetch(`${LOCAL_SERVER}/scan`);
+      if (!localRes.ok) {
+        const err = await localRes.json().catch(() => ({ error: "Scan fehlgeschlagen" }));
+        setScanError((err as { error?: string }).error ?? "Scan fehlgeschlagen");
+        return;
       }
-      allEntries.sort((a, b) => a.name.localeCompare(b.name));
+      const localData = await localRes.json() as {
+        leer?:               boolean;
+        baseName:            string;
+        bildTyp:             "foto" | "video";
+        files:               string[];
+        exif:                ExifData;
+        previewBase64:       string | null;
+        videoFile:           string | null;
+        anzahlZuVerarbeiten: number;
+      };
 
-      if (allEntries.length === 0) {
+      if (localData.leer) {
         setLeer(true);
         setAnzahlZuVerarbeiten(0);
         return;
       }
 
-      // 2. Anzahl eindeutiger Basisnamen zählen
-      const allBaseNames = new Set(
-        allEntries.map((e) => normalizeBaseName(e.name).toLowerCase())
-      );
-      setAnzahlZuVerarbeiten(allBaseNames.size);
+      setAnzahlZuVerarbeiten(localData.anzahlZuVerarbeiten);
+      if (localData.previewBase64) setPreviewUrl(localData.previewBase64);
 
-      // 3. Ersten Basisnamen verarbeiten
-      const firstBaseName = normalizeBaseName(allEntries[0].name);
-
-      // 4. Alle Dateien mit diesem Basisnamen sammeln
-      const fileMap  = new Map<string, File>();   // ext → File
-      const origNames: string[] = [];             // für späteres Löschen
-
-      for (const { name, handle } of allEntries) {
-        const extIdx  = name.lastIndexOf(".");
-        const ext     = extIdx >= 0 ? name.slice(extIdx + 1).toLowerCase() : "";
-        const baseName = normalizeBaseName(name);
-        if (baseName.toLowerCase() === firstBaseName.toLowerCase()) {
-          const file = await handle.getFile();
-          fileMap.set(ext, file);
-          origNames.push(name);
-        }
-      }
-
-      setClientFiles(fileMap);
-      setOrigNamesToDelete(origNames);
-
-      // 5. Bildtyp
-      const hasJpg   = ["jpg", "jpeg", "dsc"].some((k) => fileMap.has(k));
-      const hasVideo = ["mov", "mp4"].some((k) => fileMap.has(k));
-      const bildTyp: "foto" | "video" = hasVideo && !hasJpg ? "video" : "foto";
-
-      // 6. EXIF client-seitig lesen
-      const EXIF_PRIORITY = ["jpg", "jpeg", "cr3", "cr2", "hif", "dng", "nef", "arw", "raf"];
-      const exifKey = bildTyp === "foto"
-        ? EXIF_PRIORITY.find((k) => fileMap.has(k))
-        : undefined;
-
-      let exifResult: ExifData = { ...EMPTY_EXIF };
-
-      if (exifKey) {
-        const file = fileMap.get(exifKey)!;
-        try {
-          const { default: exifr } = await import("exifr");
-          const buffer = await file.arrayBuffer();
-          const exif   = await exifr.parse(buffer, true);
-
-          if (exif) {
-            const rawDate =
-              exif.DateTimeOriginal ?? exif.CreateDate ?? exif.DateTime ?? null;
-            let aufnahmeDate: Date | null = null;
-            if (rawDate instanceof Date && !isNaN(rawDate.getTime())) {
-              aufnahmeDate = rawDate;
-            } else if (typeof rawDate === "string" && rawDate.trim()) {
-              const normalized = rawDate.trim().replace(
-                /^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3"
-              );
-              const parsed = new Date(normalized);
-              if (!isNaN(parsed.getTime())) aufnahmeDate = parsed;
-            }
-            if (aufnahmeDate) {
-              exifResult.aufnahmedatum = formatIsoDate(aufnahmeDate);
-              exifResult.aufnahmezeit  = formatTime(aufnahmeDate);
-              exifResult.bdatum        = formatBdatum(aufnahmeDate);
-            }
-
-            if (exif.FNumber) exifResult.blende = `F/${exif.FNumber}`;
-            if (exif.ExposureTime) {
-              const et = exif.ExposureTime as number;
-              exifResult.belichtung = et >= 1 ? `${et}s` : `1/${Math.round(1 / et)}s`;
-            }
-            if (exif.FocalLength) exifResult.brennweite = `${exif.FocalLength}mm`;
-            const iso = exif.ISO ?? exif.ISOSpeedRatings ?? exif.PhotographicSensitivity;
-            if (iso != null) exifResult.iso = String(iso);
-            const model = exif.Model ?? exif.Make;
-            if (model) exifResult.kamera = String(model).trim();
-
-            // GPS
-            if (typeof exif.latitude === "number" && !isNaN(exif.latitude)) {
-              exifResult.gpsBreite = exif.latitude;
-            } else if (Array.isArray(exif.GPSLatitude)) {
-              const [g, m, s] = exif.GPSLatitude as number[];
-              const dec = g + m / 60 + s / 3600;
-              exifResult.gpsBreite = exif.GPSLatitudeRef === "S" ? -dec : dec;
-            }
-            if (typeof exif.longitude === "number" && !isNaN(exif.longitude)) {
-              exifResult.gpsLaenge = exif.longitude;
-            } else if (Array.isArray(exif.GPSLongitude)) {
-              const [g, m, s] = exif.GPSLongitude as number[];
-              const dec = g + m / 60 + s / 3600;
-              exifResult.gpsLaenge = exif.GPSLongitudeRef === "W" ? -dec : dec;
-            }
-            if (typeof exif.GPSAltitude === "number")
-              exifResult.gpsHoehe = exif.GPSAltitude;
-            if (typeof exif.GPSImgDirection === "number")
-              exifResult.gpsRichtung = exif.GPSImgDirection % 360;
-          }
-        } catch (exifErr) {
-          console.warn("EXIF-Fehler (ignoriert):", exifErr);
-        }
-      }
-
-      // 7. Vorschau Blob-URL
-      const jpgKey   = ["jpg", "jpeg", "dsc"].find((k) => fileMap.has(k));
-      const videoKey = fileMap.has("mp4") ? "mp4" : fileMap.has("mov") ? "mov" : null;
-      const previewFile = jpgKey
-        ? fileMap.get(jpgKey)!
-        : videoKey ? fileMap.get(videoKey)! : null;
-      if (previewFile) {
-        const url = URL.createObjectURL(previewFile);
-        previewUrlRef.current = url;
-        setPreviewUrl(url);
-      }
-
-      // 8. Server: bnummer + Geocoding + letzte DB-Einträge
+      // 2. Remote-Server: bnummer + Geocoding
       const params = new URLSearchParams();
-      if (exifResult.gpsBreite !== 0) params.set("lat", String(exifResult.gpsBreite));
-      if (exifResult.gpsLaenge !== 0) params.set("lon", String(exifResult.gpsLaenge));
+      if (localData.exif.gpsBreite !== 0) params.set("lat", String(localData.exif.gpsBreite));
+      if (localData.exif.gpsLaenge !== 0) params.set("lon", String(localData.exif.gpsLaenge));
 
       const serverRes = await fetch(`/api/fotodatenbank/scan?${params}`);
       if (!serverRes.ok) {
         const errData = await serverRes.json().catch(() => ({}));
-        setScanError(
-          (errData as { error?: string }).error ?? "Fehler beim Laden der DB-Daten"
-        );
+        setScanError((errData as { error?: string }).error ?? "Fehler beim Laden der DB-Daten");
         return;
       }
       const serverData = await serverRes.json() as {
@@ -369,25 +243,26 @@ export default function FotodatenbankEingabe() {
         geoOrt:          string;
       };
 
-      // 9. ScanData zusammenstellen
+      // 3. ScanData zusammenstellen
       const fileMapDisplay: Record<string, string> = {};
-      for (const ext of fileMap.keys()) {
-        fileMapDisplay[ext] = `${firstBaseName}.${ext}`;
+      for (const f of localData.files) {
+        const extIdx = f.lastIndexOf(".");
+        const ext    = extIdx >= 0 ? f.slice(extIdx + 1).toLowerCase() : "";
+        fileMapDisplay[ext] = f;
       }
 
-      const newScanData: ScanData = {
+      setScanData({
         bnummer:         serverData.bnummer,
-        baseName:        firstBaseName,
-        bildTyp,
-        files:           [...fileMap.keys()].map((ext) => `${firstBaseName}.${ext}`),
+        baseName:        localData.baseName,
+        bildTyp:         localData.bildTyp,
+        files:           localData.files,
         fileMap:         fileMapDisplay,
-        exif:            exifResult,
+        exif:            localData.exif,
         letzterEintrag:  serverData.letzterEintrag,
         letzteIdfgruppe: serverData.letzteIdfgruppe,
         geoLand:         serverData.geoLand,
         geoOrt:          serverData.geoOrt,
-      };
-      setScanData(newScanData);
+      });
 
       setForm((prev) => ({
         ...prev,
@@ -396,53 +271,44 @@ export default function FotodatenbankEingabe() {
         bastitel:       "",
         basreihenfolge: "5",
         basfgruppe:     "Sonstige",
-        bdatum:         exifResult.bdatum || prev.bdatum,
-        bnegativnr:     bildTyp === "video" ? "Video" : "digital",
+        bdatum:         localData.exif.bdatum || prev.bdatum,
+        bnegativnr:     localData.bildTyp === "video" ? "Video" : "digital",
         pfad:           calcNewpath(serverData.bnummer),
-        gpsbreite:      exifResult.gpsBreite,
-        gpslaenge:      exifResult.gpsLaenge,
-        gpshoehe:       exifResult.gpsHoehe,
+        gpsbreite:      localData.exif.gpsBreite,
+        gpslaenge:      localData.exif.gpsLaenge,
+        gpshoehe:       localData.exif.gpsHoehe,
         land:     serverData.geoLand || serverData.letzterEintrag?.land  || prev.land,
         ort:      serverData.geoOrt  || serverData.letzterEintrag?.ort   || prev.ort,
         fotograf: serverData.letzterEintrag?.fotograf ?? prev.fotograf,
-        idfgruppe: String(serverData.letzteIdfgruppe ?? prev.idfgruppe),
+        idfgruppe: String(serverData.letzteIdfgruppe ?? prev.idfgruppe ?? ""),
       }));
     } catch (err) {
       setScanError(String(err));
     } finally {
       setLoading(false);
     }
-  }, [dirHandle]);
+  }, []);
 
-  // ── Ordner auswählen ──────────────────────────────────────────────────────
-  async function handleSelectFolder() {
-    if (!("showDirectoryPicker" in window)) {
-      setScanError(
-        "Dein Browser unterstützt die File System Access API nicht. " +
-        "Bitte Chrome oder Edge verwenden."
-      );
-      return;
-    }
+  // ── Lokalen Server beim Start prüfen ─────────────────────────────────────
+  async function checkLocalServer() {
+    setLocalServerStatus("checking");
     try {
-      const handle = await (window as Window & typeof globalThis & {
-        showDirectoryPicker: (opts?: object) => Promise<FileSystemDirectoryHandle>
-      }).showDirectoryPicker({
-        id: "zuverarbeiten",
-        mode: "readwrite",
-        startIn: "desktop",
-      });
-      setDirHandle(handle);
-    } catch (err) {
-      if ((err as DOMException).name !== "AbortError") {
-        setScanError(String(err));
-      }
+      const res = await fetch(`${LOCAL_SERVER}/status`);
+      setLocalServerStatus(res.ok ? "ok" : "error");
+    } catch {
+      setLocalServerStatus("error");
     }
   }
 
-  // ── Scan starten wenn Ordner gewählt ─────────────────────────────────────
+  // ── Beim Start: Server prüfen; wenn ok: scannen ──────────────────────────
   useEffect(() => {
-    if (dirHandle) scanNaechstesBild();
-  }, [dirHandle, scanNaechstesBild]);
+    checkLocalServer();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (localServerStatus === "ok") scanNaechstesBild();
+  }, [localServerStatus, scanNaechstesBild]);
 
   // ── Fotogruppen + Alben + Tags beim Start laden ───────────────────────────
   useEffect(() => {
@@ -483,7 +349,7 @@ export default function FotodatenbankEingabe() {
   // ── Formular abschicken ───────────────────────────────────────────────────
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!scanData || !dirHandle) return;
+    if (!scanData) return;
 
     setSubmitting(true);
     setSubmitError(null);
@@ -523,57 +389,62 @@ export default function FotodatenbankEingabe() {
       fd.append("galerieGruppenIds",   JSON.stringify(galerieGruppenIds));
       fd.append("galerieTagIds",       JSON.stringify(galerieTags.map((t) => t.id)));
 
-      // Dateien anhängen (Feldname = Extension)
-      for (const [ext, file] of clientFiles.entries()) {
-        fd.append(ext, file);
-      }
+      // Schritt 1: Lokaler Server verarbeitet Dateien + erstellt kleine JPGs
+      const generateBas     = !!(form.bas && form.bas !== "0");
+      const generateGalerie = galerieUebernehmen;
 
-      // Debug: Dateigrößen loggen bevor Upload
-      let totalBytes = 0;
-      for (const [ext, file] of clientFiles.entries()) {
-        console.log(`[eintragen] Datei: ${ext} → ${(file.size / 1024 / 1024).toFixed(2)} MB`);
-        totalBytes += file.size;
-      }
-      console.log(`[eintragen] Gesamt-Upload-Größe: ${(totalBytes / 1024 / 1024).toFixed(2)} MB`);
-
-      const res = await fetch("/api/fotodatenbank/eintragen", {
-        method: "POST",
-        body: fd, // Browser setzt Content-Type multipart/form-data automatisch
+      const processRes = await fetch(`${LOCAL_SERVER}/process`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({
+          bnummer:         scanData.bnummer,
+          pfad:            form.pfad,
+          baseName:        scanData.baseName,
+          generateBas,
+          generateGalerie,
+        }),
       });
 
-      console.log(`[eintragen] Server-Antwort: HTTP ${res.status} ${res.statusText}`);
+      if (!processRes.ok) {
+        const err = await processRes.json().catch(() => ({ error: "Lokale Verarbeitung fehlgeschlagen" }));
+        setSubmitError((err as { error?: string }).error ?? "Lokale Verarbeitung fehlgeschlagen");
+        return;
+      }
 
-      // Antwort-Text immer zuerst lesen (für Debugging)
+      const processData = await processRes.json() as {
+        moved:            string[];
+        errors:           string[];
+        basJpgBase64:     string | null;
+        galerieJpgBase64: string | null;
+      };
+
+      if (processData.errors.length > 0) {
+        console.warn("[eintragen] Lokale Fehler:", processData.errors);
+      }
+
+      // Kleine JPGs an FormData hängen
+      if (processData.basJpgBase64)     fd.append("basJpgBase64",     processData.basJpgBase64);
+      if (processData.galerieJpgBase64) fd.append("galerieJpgBase64", processData.galerieJpgBase64);
+
+      // Schritt 2: Remote-Server – DB-Eintrag + BAS/Galerie-Upload
+      const res = await fetch("/api/fotodatenbank/eintragen", {
+        method: "POST",
+        body:   fd,
+      });
+
       const rawText = await res.text();
-      console.log("[eintragen] Antwort-Body (raw):", rawText);
-
       let result: Record<string, unknown> = {};
       try {
         result = JSON.parse(rawText);
       } catch {
-        // Antwort war kein JSON (z.B. Apache 413 Entity Too Large)
-        setSubmitError(
-          `HTTP ${res.status} – ${res.statusText || "Unbekannter Fehler"} ` +
-          `(Antwort war kein JSON – möglicherweise zu große Datei für Apache-Proxy)`
-        );
-        console.error("[eintragen] Nicht-JSON-Antwort! Raw:", rawText.substring(0, 500));
+        setSubmitError(`HTTP ${res.status} – ${res.statusText || "Unbekannter Fehler"}`);
         return;
       }
       if (!res.ok) {
-        const errMsg   = String(result.error   ?? "Fehler beim Eintragen");
-        const details  = result.details ? ` – Details: ${result.details}` : "";
-        console.error("[eintragen] Server-Fehler (JSON):", result);
+        const errMsg  = String(result.error  ?? "Fehler beim Eintragen");
+        const details = result.details ? ` – ${result.details}` : "";
         setSubmitError(`${errMsg}${details}`);
         return;
-      }
-
-      // Lokale Dateien aus zuverarbeiten-Ordner löschen
-      for (const origName of origNamesToDelete) {
-        try {
-          await dirHandle.removeEntry(origName);
-        } catch (delErr) {
-          console.warn(`Konnte ${origName} nicht löschen:`, delErr);
-        }
       }
 
       const galerieInfo = result.galeriePhotoId
@@ -598,39 +469,45 @@ export default function FotodatenbankEingabe() {
   const hasGps   = form.gpsbreite !== 0 || form.gpslaenge !== 0;
 
   // ─────────────────────────────────────────────────────────────────────────
-  // UI: Kein Ordner ausgewählt
-  if (!dirHandle) {
-    const isSupported =
-      typeof window !== "undefined" && "showDirectoryPicker" in window;
+  // UI: Lokalen Server prüfen
+  if (localServerStatus === "checking") {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <Loader2 className="w-8 h-8 text-amber-400 animate-spin mr-3" />
+        <span className="text-gray-300">Verbinde mit lokalem Prozessor…</span>
+      </div>
+    );
+  }
 
+  if (localServerStatus === "error") {
     return (
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-10 text-center max-w-lg mx-auto">
-        <FolderOpen className="w-14 h-14 text-amber-400 mx-auto mb-4" />
+        <div className="w-14 h-14 rounded-full bg-red-900/30 flex items-center justify-center mx-auto mb-4">
+          <AlertCircle className="w-8 h-8 text-red-400" />
+        </div>
         <h2 className="text-xl font-semibold text-white mb-2">
-          Lokalen Ordner auswählen
+          Lokaler Prozessor nicht erreichbar
         </h2>
-        <p className="text-gray-400 text-sm leading-relaxed mb-6">
-          Wähle den Ordner <code className="text-amber-400 bg-gray-800 px-1.5 py-0.5 rounded text-xs">zuverarbeiten</code> auf
-          deinem PC aus. Der Browser liest die Dateien direkt – keine
-          Serververbindung zu deinem lokalen PC nötig.
+        <p className="text-gray-400 text-sm leading-relaxed mb-4">
+          Bitte starte den lokalen Fotodatenbank-Prozessor auf deinem PC:
         </p>
-        {!isSupported ? (
-          <p className="text-red-400 text-sm">
-            ⚠ Dein Browser unterstützt die File System Access API nicht.
-            <br />Bitte Chrome oder Edge verwenden.
-          </p>
-        ) : (
-          <button
-            onClick={handleSelectFolder}
-            className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
-          >
-            <FolderOpen className="w-5 h-5" />
-            Ordner auswählen…
-          </button>
-        )}
-        {scanError && (
-          <p className="mt-4 text-red-400 text-sm">{scanError}</p>
-        )}
+        <div className="bg-gray-800 rounded-lg p-4 text-left text-xs text-amber-300 font-mono mb-4">
+          <div className="text-gray-500 mb-1"># Desktop-Verknüpfung doppelklicken:</div>
+          <div>start-fotodatenbank.vbs</div>
+          <div className="text-gray-500 mt-2 mb-1"># Oder im Terminal:</div>
+          <div>node scripts/local-fotodatenbank.mjs</div>
+        </div>
+        <p className="text-gray-500 text-xs mb-6">
+          Der Server läuft dann auf{" "}
+          <code className="text-amber-400">http://localhost:4567</code>
+        </p>
+        <button
+          onClick={checkLocalServer}
+          className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-600 text-white px-6 py-3 rounded-lg font-semibold transition-colors"
+        >
+          <RefreshCw className="w-5 h-5" />
+          Erneut verbinden
+        </button>
       </div>
     );
   }
@@ -671,11 +548,11 @@ export default function FotodatenbankEingabe() {
             Erneut scannen
           </button>
           <button
-            onClick={() => { setDirHandle(null); setLeer(false); }}
+            onClick={checkLocalServer}
             className="inline-flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-white px-5 py-2.5 rounded-lg font-medium transition-colors"
           >
-            <FolderOpen className="w-4 h-4" />
-            Anderen Ordner wählen
+            <RefreshCw className="w-4 h-4" />
+            Server neu prüfen
           </button>
         </div>
       </div>
@@ -699,11 +576,11 @@ export default function FotodatenbankEingabe() {
             Nochmal versuchen
           </button>
           <button
-            onClick={() => { setDirHandle(null); setScanError(null); }}
+            onClick={checkLocalServer}
             className="inline-flex items-center gap-2 text-gray-300 hover:text-white bg-gray-800 hover:bg-gray-700 px-4 py-2 rounded-lg text-sm transition-colors"
           >
-            <FolderOpen className="w-4 h-4" />
-            Anderen Ordner wählen
+            <RefreshCw className="w-4 h-4" />
+            Server neu prüfen
           </button>
         </div>
       </div>
@@ -1273,11 +1150,11 @@ export default function FotodatenbankEingabe() {
         <div className="flex-shrink-0 flex items-center gap-2">
           <button
             type="button"
-            onClick={() => { setDirHandle(null); setScanData(null); }}
-            title="Anderen Ordner wählen"
+            onClick={scanNaechstesBild}
+            title="Nächstes Bild neu scannen"
             className="inline-flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-2.5 rounded-lg text-sm transition-colors"
           >
-            <FolderOpen className="w-4 h-4" />
+            <RefreshCw className="w-4 h-4" />
           </button>
           <Link
             href="/fotodatenbank/fotogruppen"

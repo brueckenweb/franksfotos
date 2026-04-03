@@ -1,14 +1,20 @@
 /**
- * API-Route: Foto in fd_fotodatenbank eintragen + Dateien auf Server speichern
+ * API-Route: Foto in fd_fotodatenbank eintragen
  * POST /api/fotodatenbank/eintragen  (multipart/form-data)
  * Nur für isMainAdmin zugänglich
  *
- * Die Dateien werden vom Client (Browser) per Upload geschickt –
- * kein direkter Zugriff auf den lokalen Eingangsordner mehr.
+ * NEU (lokaler Prozessor):
+ *   Dateien werden NICHT mehr hochgeladen.
+ *   Der lokale Node-Server (scripts/local-fotodatenbank.mjs) übernimmt:
+ *     - Dateien umbenennen/verschieben (lokal)
+ *     - JPG verkleinern (BAS: 800px, Galerie: 2000px)
+ *   Diese Route empfängt nur noch:
+ *     - Metadaten (Formularfelder)
+ *     - basJpgBase64:     base64-JPG für BAS-Upload (optional, ~80 KB)
+ *     - galerieJpgBase64: base64-JPG für Galerie (optional, ~1.5 MB)
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import Busboy from "busboy";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import {
@@ -23,14 +29,8 @@ import {
 import { brueckenDb } from "@/lib/db/brueckendb";
 import { sql } from "drizzle-orm";
 import { eq } from "drizzle-orm";
-import fs from "fs";
-import path from "path";
 import sharp from "sharp";
 import { UPLOAD_CONFIG } from "@/lib/upload/config";
-
-// Nur noch der fotos/-Ordner liegt auf dem Server
-const BASE_PATH  = process.env.FS_FOTODATENBANK_PATH ?? "/tmp/FS_Fotodatenbank";
-const FOTOS_PATH = path.join(BASE_PATH, "fotos");
 
 const BRUECKEN_UPLOAD_ENDPOINT =
   process.env.BRUECKEN_UPLOAD_PHP_ENDPOINT ?? "";
@@ -60,74 +60,19 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Kein Zugriff" }, { status: 403 });
   }
 
-  // ── Request-Infos loggen ──────────────────────────────────────────────────
-  const contentType   = request.headers.get("content-type")   ?? "";
-  const contentLength = request.headers.get("content-length") ?? "?";
-  console.log("📥 [eintragen] Request:", { contentType, contentLength, url: request.url });
-
-  if (!contentType.includes("multipart/form-data")) {
-    return NextResponse.json(
-      { error: "Ungültiger Content-Type", details: `Erwartet: multipart/form-data, erhalten: ${contentType}` },
-      { status: 400 }
-    );
-  }
-
-  // ── Multipart-Body direkt mit busboy streamen (umgeht Next.js 4MB-Limit) ──
-  const fields:        Record<string, string> = {};
-  const uploadedFiles: Record<string, Buffer> = {};
-
+  // ── Formulardaten lesen (nur Metadaten + kleine base64-Strings) ────────────
+  let formData: FormData;
   try {
-    await new Promise<void>((resolve, reject) => {
-      const bb = Busboy({
-        headers: { "content-type": contentType },
-        limits:  { fileSize: 600 * 1024 * 1024 }, // 600 MB max
-      });
-
-      bb.on("field", (name: string, value: string) => {
-        fields[name] = value;
-      });
-
-      bb.on("file", (name: string, fileStream: NodeJS.ReadableStream) => {
-        const chunks: Buffer[] = [];
-        fileStream.on("data", (chunk: Buffer) => chunks.push(chunk));
-        fileStream.on("end",  () => {
-          if (chunks.length > 0) uploadedFiles[name] = Buffer.concat(chunks);
-        });
-        fileStream.on("error", reject);
-      });
-
-      bb.on("finish", resolve);
-      bb.on("error",  reject);
-
-      if (!request.body) {
-        reject(new Error("Request hat keinen Body"));
-        return;
-      }
-      // request.body ist ein Web ReadableStream → byteweise an busboy schreiben
-      const reader = request.body.getReader();
-      const pump   = async () => {
-        try {
-          for (;;) {
-            const { done, value } = await reader.read();
-            if (done) { bb.end(); break; }
-            bb.write(value);
-          }
-        } catch (err) {
-          reject(err);
-        }
-      };
-      pump();
-    });
-    console.log("✅ [eintragen] busboy OK – Felder:", Object.keys(fields), "| Dateien:", Object.keys(uploadedFiles));
-  } catch (parseErr) {
-    console.error("❌ [eintragen] busboy Fehler:", parseErr);
+    formData = await request.formData();
+  } catch (formErr) {
+    console.error("❌ [eintragen] formData fehlgeschlagen:", formErr);
     return NextResponse.json(
-      { error: "Fehler beim Parsen des Uploads", details: String(parseErr) },
+      { error: "Ungültige Formulardaten", details: String(formErr) },
       { status: 400 }
     );
   }
 
-  const g = (key: string) => String(fields[key] ?? "");
+  const g = (key: string) => String(formData.get(key) ?? "");
 
   const bnummer = Number(g("bnummer"));
   if (!bnummer || isNaN(bnummer)) {
@@ -169,60 +114,21 @@ export async function POST(request: NextRequest) {
   let galerieTagIds: number[] = [];
   try { galerieTagIds = JSON.parse(g("galerieTagIds") || "[]"); } catch { /* leer */ }
 
-  if (Object.keys(uploadedFiles).length === 0) {
-    return NextResponse.json(
-      { error: "Keine Datei hochgeladen" },
-      { status: 400 }
-    );
-  }
+  // ── Base64-JPGs vom lokalen Prozessor ──────────────────────────────────────
+  const basJpgBase64     = g("basJpgBase64")     || null; // ~80 KB
+  const galerieJpgBase64 = g("galerieJpgBase64") || null; // ~1.5 MB
+
+  const basBuffer     = basJpgBase64     ? Buffer.from(basJpgBase64,     "base64") : null;
+  const galerieBuffer = galerieJpgBase64 ? Buffer.from(galerieJpgBase64, "base64") : null;
+
+  const newpath   = Math.floor(bnummer / 10000) + "bilder";
+  const pfadFinal = pfad || newpath;
 
   try {
-    // 1. Zielpfad anlegen
-    const newpath   = Math.floor(bnummer / 10000) + "bilder";
-    const pfadFinal = pfad || newpath;
-    const zielordner = path.join(FOTOS_PATH, pfadFinal);
-    fs.mkdirSync(zielordner, { recursive: true });
+    // 1. Eintrag in fd_fotodatenbank
+    const safeDatumDate = isValidDate(aufnahmedatum) ? parseDate(aufnahmedatum) : getHeuteDatum();
+    const safeZeit      = isValidTime(aufnahmezeit)  ? aufnahmezeit              : "00:00:00";
 
-    // 2. Dateien auf Disk speichern  (Feldname = Extension, Ziel = B{nr}.EXT)
-    const SAVE_MAP: Array<[string[], string]> = [
-      [["jpg", "jpeg", "dsc"], ".jpg"],
-      [["cr2"],                ".CR2"],
-      [["cr3"],                ".CR3"],
-      [["hif"],                ".HIF"],
-      [["dng"],                ".dng"],
-      [["mov"],                ".mov"],
-      [["mp4"],                ".mp4"],
-      [["thm"],                ".THM"],
-    ];
-
-    const moveErrors: string[] = [];
-    for (const [keys, destExt] of SAVE_MAP) {
-      for (const key of keys) {
-        const buf = uploadedFiles[key];
-        if (buf) {
-          const destPath = path.join(zielordner, `B${bnummer}${destExt}`);
-          try {
-            fs.writeFileSync(destPath, buf);
-          } catch (err) {
-            moveErrors.push(`${key}→${destExt}: ${String(err)}`);
-          }
-          break; // Nur erste Variante pro Format
-        }
-      }
-    }
-
-    // 3. JPG-Buffer für BAS + Galerie
-    const jpgBuffer =
-      uploadedFiles["jpg"] ?? uploadedFiles["jpeg"] ?? uploadedFiles["dsc"];
-    const destJpgPath = path.join(zielordner, `B${bnummer}.jpg`);
-
-    // 4. Datum validieren
-    const safeDatumDate = isValidDate(aufnahmedatum)
-      ? parseDate(aufnahmedatum)
-      : getHeuteDatum();
-    const safeZeit = isValidTime(aufnahmezeit) ? aufnahmezeit : "00:00:00";
-
-    // 5. Eintrag in fd_fotodatenbank
     await db.insert(fdFotodatenbank).values({
       bnummer,
       land, ort, titel, bdatum,
@@ -241,7 +147,7 @@ export async function POST(request: NextRequest) {
       eingetragen:      getHeuteDatum(),
     });
 
-    // 6. Fotogruppen-Verknüpfung
+    // 2. Fotogruppen-Verknüpfung
     if (idfgruppe) {
       const [gruppe] = await db
         .select({ name: fdFotogruppen.name })
@@ -256,8 +162,8 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // 7. BAS-Eintrag in brueckenweb-DB
-    if (bas && bas !== "0" && bas !== "" && jpgBuffer) {
+    // 3. BAS-Upload zu brueckenweb.de
+    if (bas && bas !== "0" && basBuffer) {
       const baslink = `BAS${bas}_B${bnummer}.jpg`;
       try {
         let basPath = "bilder171";
@@ -276,13 +182,9 @@ export async function POST(request: NextRequest) {
         }
 
         if (BRUECKEN_UPLOAD_ENDPOINT) {
-          const resizedBuffer = await sharp(jpgBuffer)
-            .resize(800, undefined, { withoutEnlargement: true })
-            .jpeg({ quality: 85 })
-            .toBuffer();
-
+          // basBuffer kommt schon als 800px vom lokalen Prozessor
           const fd2 = new FormData();
-          fd2.append("file", new Blob([new Uint8Array(resizedBuffer)], { type: "image/jpeg" }), baslink);
+          fd2.append("file", new Blob([new Uint8Array(basBuffer)], { type: "image/jpeg" }), baslink);
           fd2.append("path",     basPath);
           fd2.append("filename", baslink);
 
@@ -295,7 +197,7 @@ export async function POST(request: NextRequest) {
           console.warn("BRUECKEN_UPLOAD_PHP_ENDPOINT nicht gesetzt – BAS-Bild nicht hochgeladen");
         }
 
-        const rechte       = `brueckenweb.de / ${fotograf}`;
+        const rechte        = `brueckenweb.de / ${fotograf}`;
         const basFgroupSafe = basfgruppe.replace(/'/g, "\\'");
         const bastitelSafe  = bastitel.replace(/'/g, "\\'");
         const rechteSafe    = rechte.replace(/'/g, "\\'");
@@ -308,17 +210,14 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 8. Fotogalerie-Upload (optional)
+    // 4. Fotogalerie-Upload (optional)
     let galeriePhotoId: number | null = null;
     let galerieError:   string | null = null;
 
-    if (galerieUebernehmen && fs.existsSync(destJpgPath)) {
+    if (galerieUebernehmen && galerieBuffer) {
       try {
-        const resizedBuffer = await sharp(destJpgPath)
-          .resize(2000, undefined, { withoutEnlargement: true })
-          .jpeg({ quality: 90 })
-          .toBuffer();
-
+        // Galerie-Buffer kommt schon als 2000px vom lokalen Prozessor
+        // Wir senden ihn direkt an den PHP-Upload-Endpoint
         let albumSlug = "";
         if (galerieAlbumId) {
           const [albumRow] = await db
@@ -327,7 +226,7 @@ export async function POST(request: NextRequest) {
             .where(eq(albums.id, galerieAlbumId));
           albumSlug = albumRow?.slug ?? "";
         }
-        const phpPath    = albumSlug ? `fotos/${albumSlug}` : "fotos";
+        const phpPath     = albumSlug ? `fotos/${albumSlug}` : "fotos";
         const galFilename = `B${bnummer}.jpg`;
         const phpEndpoint = UPLOAD_CONFIG.phpEndpoint;
 
@@ -338,9 +237,9 @@ export async function POST(request: NextRequest) {
             "X-Upload-Path":  phpPath,
             "X-Upload-Name":  galFilename,
             "Content-Type":   "image/jpeg",
-            "Content-Length": String(resizedBuffer.length),
+            "Content-Length": String(galerieBuffer.length),
           },
-          body: new Uint8Array(resizedBuffer).buffer as ArrayBuffer,
+          body: new Uint8Array(galerieBuffer).buffer as ArrayBuffer,
         });
 
         if (!uploadRes.ok) throw new Error(`PHP-Upload fehlgeschlagen: ${uploadRes.status}`);
@@ -398,7 +297,6 @@ export async function POST(request: NextRequest) {
       success:        true,
       bnummer,
       pfad:           pfadFinal,
-      moveErrors:     moveErrors.length > 0 ? moveErrors : undefined,
       galeriePhotoId: galeriePhotoId ?? undefined,
       galerieError:   galerieError   ?? undefined,
     });
@@ -407,3 +305,7 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: String(error) }, { status: 500 });
   }
 }
+
+// Nicht mehr benötigt seit lokaler Prozessor – aber sharp bleibt als Dependency
+// (wird für andere Teile der App genutzt)
+void sharp;
