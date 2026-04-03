@@ -64,15 +64,18 @@ export const authConfig: NextAuthConfig = {
           return null;
         }
 
+        const email = credentials.email as string;
+
         try {
           // User aus der Datenbank laden
           const userResult = await db
             .select()
             .from(users)
-            .where(eq(users.email, credentials.email as string))
+            .where(eq(users.email, email))
             .limit(1);
 
           const user = userResult[0];
+
           if (!user || !user.isActive) return null;
 
           // Passwort prüfen

@@ -53,6 +53,13 @@ module.exports = {
       NEXT_PUBLIC_APP_NAME: 'FranksFotos',
       NEXT_PUBLIC_MEDIA_BASE_URL: 'https://pics.frank-sellke.de',
 
+      // Fotodatenbank – Basispfad auf dem Server
+      // Nur noch für den Unterordner "fotos/" (verarbeitete Fotos) genutzt.
+      // "zuverarbeiten/" wird NICHT mehr vom Server gelesen – stattdessen
+      // liest der Browser die Dateien client-seitig via File System Access API
+      // und überträgt sie per multipart-Upload an den Server.
+      FS_FOTODATENBANK_PATH: '/home/users/franksellke/FS_Fotodatenbank',
+
       // Performance
       NEXT_TELEMETRY_DISABLED: '1'
     }

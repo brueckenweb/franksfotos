@@ -110,13 +110,24 @@ UPLOAD_PHP_ENDPOINT=https://pics.frank-sellke.de/upload.php
 WATERMARK_TEXT=© FranksFotos – frank-sellke.de
 WATERMARK_OPACITY=0.4
 
+# Fotodatenbank – lokaler Eingangsordner auf dem Server
+# Unter diesem Pfad liegen die Unterordner "zuverarbeiten/" und "fotos/"
+# Auf dem Server muss dieser Ordner existieren und beschreibbar sein!
+FS_FOTODATENBANK_PATH=/home/users/franksellke/FS_Fotodatenbank
+
 # App
 NEXT_PUBLIC_APP_URL=https://www.frank-sellke.de
 NEXT_PUBLIC_APP_NAME=FranksFotos
 NEXT_PUBLIC_MEDIA_BASE_URL=https://pics.frank-sellke.de
 ```
-
 > 💡 **Hinweis:** In `.env.production` keine Anführungszeichen um die Werte nötig!
+
+> ⚠️ **Wichtig:** Den Ordner `FS_FOTODATENBANK_PATH` auf dem Server anlegen und Schreibrechte setzen:
+> ```bash
+> mkdir -p /home/users/franksellke/FS_Fotodatenbank/zuverarbeiten
+> mkdir -p /home/users/franksellke/FS_Fotodatenbank/fotos
+> chmod -R 755 /home/users/franksellke/FS_Fotodatenbank
+> ```
 
 ---
 
