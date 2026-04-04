@@ -29,6 +29,7 @@ import {
   X,
   ChevronDown,
   FolderOpen,
+  Trash2,
 } from "lucide-react";
 
 const FotodatenbankMap = dynamic(
@@ -158,6 +159,9 @@ export default function FotodatenbankEingabe() {
   const [stats, setStats] = useState<{
     anzahlFotos: number; anzahlBas: number; anzahlZuVerarbeiten: number;
   } | null>(null);
+
+  const [deleting,    setDeleting]    = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [basUebernehmen, setBasUebernehmen] = useState(false);
   const basUebernehmenRef = useRef(false);
@@ -463,6 +467,51 @@ export default function FotodatenbankEingabe() {
     }
   }
 
+  // ── Foto in "gelöscht"-Ordner verschieben ────────────────────────────────
+  async function handleFotoLoeschen() {
+    if (!scanData) return;
+    if (!window.confirm(`Foto "${scanData.baseName}" wirklich in den Ordner "gelöscht" verschieben?`)) return;
+
+    setDeleting(true);
+    setDeleteError(null);
+    setSubmitError(null);
+    setSuccessMsg(null);
+
+    try {
+      const res = await fetch(`${LOCAL_SERVER}/delete`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ baseName: scanData.baseName }),
+      });
+
+      const data = await res.json() as {
+        moved?:          string[];
+        errors?:         string[];
+        geloeschtOrdner?: string;
+        error?:          string;
+      };
+
+      if (!res.ok) {
+        setDeleteError(data.error ?? "Fehler beim Verschieben");
+        return;
+      }
+
+      if (data.errors && data.errors.length > 0) {
+        setDeleteError(`Teilweise Fehler: ${data.errors.join(", ")}`);
+        return;
+      }
+
+      setSuccessMsg(
+        `🗑 ${data.moved?.length ?? 0} Datei(en) nach "gelöscht" verschoben → ${data.geloeschtOrdner ?? ""}`
+      );
+      setTimeout(() => scanNaechstesBild(), 1800);
+    } catch (err) {
+      setDeleteError(String(err));
+    } finally {
+      setDeleting(false);
+    }
+  }
+
   // ── Hilfsberechnungen für die Vorschau ────────────────────────────────────
   const isVideo  = scanData?.bildTyp === "video";
   const mp4File  = scanData?.fileMap["mp4"] ?? scanData?.fileMap["mov"] ?? null;
@@ -602,6 +651,12 @@ export default function FotodatenbankEingabe() {
         <div className="flex items-center gap-3 bg-red-900/20 border border-red-800 rounded-lg px-4 py-3 text-red-400 text-sm">
           <AlertCircle className="w-5 h-5 flex-shrink-0" />
           <span>{submitError}</span>
+        </div>
+      )}
+      {deleteError && (
+        <div className="flex items-center gap-3 bg-red-900/20 border border-red-800 rounded-lg px-4 py-3 text-red-400 text-sm">
+          <AlertCircle className="w-5 h-5 flex-shrink-0" />
+          <span>Löschen: {deleteError}</span>
         </div>
       )}
 
@@ -1155,6 +1210,20 @@ export default function FotodatenbankEingabe() {
             className="inline-flex items-center gap-1.5 bg-gray-700 hover:bg-gray-600 text-gray-300 px-3 py-2.5 rounded-lg text-sm transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
+          </button>
+          <button
+            type="button"
+            onClick={handleFotoLoeschen}
+            disabled={deleting || !scanData}
+            title="Aktuelles Foto in den Ordner 'gelöscht' verschieben (kein DB-Eintrag)"
+            className="inline-flex items-center gap-2 bg-red-800 hover:bg-red-700 disabled:bg-red-800/40 text-white px-4 py-2.5 rounded-lg font-semibold text-sm transition-colors"
+          >
+            {deleting ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Trash2 className="w-4 h-4" />
+            )}
+            Foto löschen
           </button>
           <Link
             href="/fotodatenbank/fotogruppen"

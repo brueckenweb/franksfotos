@@ -9,6 +9,7 @@
  *   GET  /status   → Health-Check
  *   GET  /scan     → Ordner scannen, EXIF lesen, Vorschau erstellen
  *   POST /process  → Dateien umbenennen/verschieben, kleine JPGs erstellen
+ *   POST /delete   → Aktuelles Foto in Unterordner "gelöscht" verschieben
  */
 
 import http  from "node:http";
@@ -103,10 +104,14 @@ async function handleScan(_req, res) {
     });
   }
 
-  // 2. Alle Dateien einlesen
+  // 2. Alle Dateien einlesen (nur Dateien, keine Unterordner wie "gelöscht")
   const allFiles = fs
     .readdirSync(ZUVERARBEITEN)
-    .filter((n) => n !== "Thumbs.db" && !n.startsWith("."))
+    .filter((n) => {
+      if (n === "Thumbs.db" || n.startsWith(".")) return false;
+      const stat = fs.statSync(path.join(ZUVERARBEITEN, n));
+      return stat.isFile();
+    })
     .sort();
 
   if (allFiles.length === 0) {
@@ -354,6 +359,68 @@ async function handleProcess(req, res) {
   });
 }
 
+async function handleDelete(req, res) {
+  let params;
+  try {
+    params = JSON.parse(await readBody(req));
+  } catch {
+    return sendJson(res, 400, { error: "Ungültiger JSON-Body" });
+  }
+
+  const { baseName } = params;
+  if (!baseName) {
+    return sendJson(res, 400, { error: "baseName ist erforderlich" });
+  }
+
+  if (!fs.existsSync(ZUVERARBEITEN)) {
+    return sendJson(res, 404, { error: `zuverarbeiten-Ordner nicht gefunden: ${ZUVERARBEITEN}` });
+  }
+
+  // Zielordner "gelöscht" anlegen
+  const geloeschtOrdner = path.join(ZUVERARBEITEN, "gelöscht");
+  try {
+    fs.mkdirSync(geloeschtOrdner, { recursive: true });
+  } catch (e) {
+    return sendJson(res, 500, { error: `Konnte 'gelöscht'-Ordner nicht anlegen: ${e.message}` });
+  }
+
+  // Alle Dateien mit diesem Basisnamen finden
+  const allFiles = fs.readdirSync(ZUVERARBEITEN).filter((n) => {
+    const stat = fs.statSync(path.join(ZUVERARBEITEN, n));
+    return stat.isFile();
+  });
+  const matched = allFiles.filter(
+    (name) => normalizeBaseName(name).toLowerCase() === String(baseName).toLowerCase()
+  );
+
+  if (matched.length === 0) {
+    return sendJson(res, 404, { error: `Keine Dateien für Basisname "${baseName}" gefunden` });
+  }
+
+  const moved  = [];
+  const errors = [];
+
+  for (const name of matched) {
+    const srcPath  = path.join(ZUVERARBEITEN, name);
+    const destPath = path.join(geloeschtOrdner, name);
+    try {
+      try {
+        fs.renameSync(srcPath, destPath);
+      } catch {
+        fs.copyFileSync(srcPath, destPath);
+        fs.unlinkSync(srcPath);
+      }
+      moved.push(name);
+    } catch (e) {
+      errors.push(`${name}: ${e.message}`);
+    }
+  }
+
+  console.log(`🗑  "${baseName}" gelöscht: ${moved.length} Datei(en) → gelöscht/${errors.length ? `, ${errors.length} Fehler` : ""}`);
+
+  sendJson(res, 200, { moved, errors, geloeschtOrdner });
+}
+
 // ── HTTP-Server ──────────────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
@@ -372,6 +439,7 @@ const server = http.createServer(async (req, res) => {
     if (route === "/status")                              return await handleStatus(req, res);
     if (route === "/scan"    && req.method === "GET")    return await handleScan(req, res);
     if (route === "/process" && req.method === "POST")   return await handleProcess(req, res);
+    if (route === "/delete"  && req.method === "POST")   return await handleDelete(req, res);
 
     sendJson(res, 404, { error: `Route nicht gefunden: ${route}` });
   } catch (err) {
