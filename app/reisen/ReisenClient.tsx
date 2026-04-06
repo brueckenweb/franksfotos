@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
-import { Plus, Globe, Map, List, X, Check, Loader2, Pencil, Trash2, MapPin, Star, ChevronDown, Share2, Copy, ExternalLink } from "lucide-react";
+import { Plus, Globe, Map, List, X, Check, Loader2, Pencil, Trash2, MapPin, Star, Share2, Copy, ExternalLink } from "lucide-react";
 import type { VisitedCountry, CityMarker, SightMarker } from "@/components/reisen/WorldMap";
 import ReisenStats from "@/components/reisen/ReisenStats";
 import { COUNTRIES, COUNTRY_MAP } from "@/lib/reisen/countries";
@@ -30,7 +30,28 @@ interface UserOption { id: number; name: string; }
 
 const SIGHT_CATEGORIES = ["Museum", "Naturdenkmal", "Burg/Schloss", "Kirche/Dom", "Denkmal", "Strand", "Park", "Aussichtspunkt", "Sonstiges"];
 
-// ─── Modals ────────────────────────────────────────────────────────────────
+type NominatimResult = {
+  display_name: string;
+  lat: string;
+  lon: string;
+  type: string;
+  address?: {
+    country_code?: string;
+    city?: string;
+    town?: string;
+    village?: string;
+    county?: string;
+  };
+};
+
+type OverpassPOI = {
+  id: number;
+  lat: number;
+  lon: number;
+  tags: { name?: string; tourism?: string; historic?: string; amenity?: string };
+};
+
+// ─── CountryModal ──────────────────────────────────────────────────────────
 
 function CountryModal({ code, name, existing, partnerName, onSave, onDelete, onClose }: {
   code: string; name: string; existing: VisitedCountry | null;
@@ -39,7 +60,7 @@ function CountryModal({ code, name, existing, partnerName, onSave, onDelete, onC
   onDelete: () => void;
   onClose: () => void;
 }) {
-  const [visitedBy, setVisitedBy] = useState(existing?.visitedBy ?? "user1");
+  const [visitedBy, setVisitedBy] = useState(existing?.visitedBy ?? "both");
   const [visitedAt, setVisitedAt] = useState(existing?.visitedAt?.substring(0, 10) ?? "");
   const [notes, setNotes]         = useState(existing?.notes ?? "");
   const [saving, setSaving]       = useState(false);
@@ -61,7 +82,6 @@ function CountryModal({ code, name, existing, partnerName, onSave, onDelete, onC
           <button onClick={onClose} className="text-gray-500 hover:text-white"><X className="w-5 h-5" /></button>
         </div>
         <div className="px-6 py-4 space-y-4">
-          {/* Wer hat bereist */}
           <div>
             <label className="block text-sm text-gray-400 mb-2">Bereist von</label>
             <div className="grid grid-cols-3 gap-2">
@@ -83,13 +103,11 @@ function CountryModal({ code, name, existing, partnerName, onSave, onDelete, onC
               ))}
             </div>
           </div>
-          {/* Datum */}
           <div>
             <label className="block text-sm text-gray-400 mb-1">Datum (optional)</label>
             <input type="date" value={visitedAt} onChange={(e) => setVisitedAt(e.target.value)}
               className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" />
           </div>
-          {/* Notiz */}
           <div>
             <label className="block text-sm text-gray-400 mb-1">Notiz</label>
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2}
@@ -117,26 +135,118 @@ function CountryModal({ code, name, existing, partnerName, onSave, onDelete, onC
   );
 }
 
-function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initialLng, onSaved, onClose }: {
-  type: "city" | "sight"; mapId: number; cities: CityMarker[];
-  partnerName: string | null; initialLat?: number; initialLng?: number;
-  onSaved: () => void; onClose: () => void;
+// ─── CityOrSightModal (Hinzufügen & Bearbeiten) ────────────────────────────
+
+function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initialLng, existing, onSaved, onClose }: {
+  type: "city" | "sight";
+  mapId: number;
+  cities: CityMarker[];
+  partnerName: string | null;
+  initialLat?: number;
+  initialLng?: number;
+  existing?: CityMarker | SightMarker | null;
+  onSaved: () => void;
+  onClose: () => void;
 }) {
-  const [name, setName]           = useState("");
-  const [countryCode, setCC]      = useState("DE");
-  const [lat, setLat]             = useState(initialLat?.toFixed(5) ?? "");
-  const [lng, setLng]             = useState(initialLng?.toFixed(5) ?? "");
-  const [visitedBy, setVisitedBy] = useState("user1");
-  const [visitedAt, setVisitedAt] = useState("");
-  const [notes, setNotes]         = useState("");
-  const [category, setCategory]   = useState("Sonstiges");
-  const [cityId, setCityId]       = useState<string>("");
+  const existingCategory = existing && "category" in existing ? existing.category : "Sonstiges";
+  const existingCityId   = existing && "cityId"   in existing ? String(existing.cityId ?? "") : "";
+
+  const [name, setName]           = useState(existing?.name ?? "");
+  const [countryCode, setCC]      = useState(existing?.countryCode ?? "DE");
+  const [lat, setLat]             = useState(
+    existing ? (existing.lat ?? "") : (initialLat?.toFixed(5) ?? "")
+  );
+  const [lng, setLng]             = useState(
+    existing ? (existing.lng ?? "") : (initialLng?.toFixed(5) ?? "")
+  );
+  const [visitedBy, setVisitedBy] = useState(existing?.visitedBy ?? "both");
+  const [visitedAt, setVisitedAt] = useState(existing?.visitedAt?.substring(0, 10) ?? "");
+  const [notes, setNotes]         = useState(existing?.notes ?? "");
+  const [category, setCategory]   = useState(existingCategory);
+  const [cityId, setCityId]       = useState<string>(existingCityId);
   const [saving, setSaving]       = useState(false);
   const [error, setError]         = useState<string | null>(null);
   const [geoLoading, setGeoLoading] = useState(false);
-  const [geoMsg, setGeoMsg]         = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [geoMsg, setGeoMsg]       = useState<{ type: "ok" | "err"; text: string } | null>(null);
 
+  // Autocomplete (Stadtname)
+  const [suggestions, setSuggestions]       = useState<NominatimResult[]>([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const suggestTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Overpass POI-Vorschläge (nur für Sehenswürdigkeiten)
+  const [poiSuggestions, setPoiSuggestions]   = useState<OverpassPOI[]>([]);
+  const [poiLoading, setPoiLoading]           = useState(false);
+  const [poiError, setPoiError]               = useState<string | null>(null);
+  const [showPoiList, setShowPoiList]         = useState(false);
+
+  const isEdit      = !!existing;
   const countryName = COUNTRY_MAP.get(countryCode)?.name ?? "";
+
+  /** Reverse Geocoding bei Kartenklick: Stadtname automatisch ermitteln */
+  useEffect(() => {
+    if (!existing && initialLat !== undefined && initialLng !== undefined && !name) {
+      setGeoLoading(true);
+      const url = `https://nominatim.openstreetmap.org/reverse?lat=${initialLat}&lon=${initialLng}&format=json&addressdetails=1&accept-language=de`;
+      fetch(url, { headers: { "User-Agent": "FranksFotos/1.0" } })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data?.address) {
+            const cityName =
+              data.address.city ??
+              data.address.town ??
+              data.address.village ??
+              data.address.county ??
+              "";
+            if (cityName) {
+              setName(cityName);
+              const cc = data.address.country_code?.toUpperCase();
+              if (cc && COUNTRY_MAP.has(cc)) setCC(cc);
+              setGeoMsg({ type: "ok", text: `✓ ${data.display_name}` });
+            }
+          }
+        })
+        .catch(() => {})
+        .finally(() => setGeoLoading(false));
+    }
+    // Nur beim ersten Öffnen ausführen
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  /** Debounced Autocomplete: holt Vorschläge von Nominatim während der Eingabe */
+  function handleNameChange(value: string) {
+    setName(value);
+    setGeoMsg(null);
+    setShowSuggestions(false);
+    if (suggestTimerRef.current) clearTimeout(suggestTimerRef.current);
+    if (value.trim().length < 2) { setSuggestions([]); return; }
+    suggestTimerRef.current = setTimeout(async () => {
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(value)}&format=json&limit=5&addressdetails=1&accept-language=de`;
+        const res = await fetch(url, { headers: { "User-Agent": "FranksFotos/1.0" } });
+        const data: NominatimResult[] = await res.json();
+        setSuggestions(data ?? []);
+        setShowSuggestions((data ?? []).length > 0);
+      } catch { /* ignorieren */ }
+    }, 400);
+  }
+
+  /** Vorschlag aus der Dropdown-Liste auswählen → füllt alle Felder */
+  function pickSuggestion(hit: NominatimResult) {
+    const primaryName =
+      hit.address?.city ??
+      hit.address?.town ??
+      hit.address?.village ??
+      hit.display_name.split(",")[0].trim();
+    setName(primaryName);
+    setLat(parseFloat(hit.lat).toFixed(5));
+    setLng(parseFloat(hit.lon).toFixed(5));
+    const cc = hit.address?.country_code?.toUpperCase();
+    if (cc && COUNTRY_MAP.has(cc)) setCC(cc);
+    setGeoMsg({ type: "ok", text: `✓ ${hit.display_name}` });
+    setShowSuggestions(false);
+    setSuggestions([]);
+  }
 
   /** Geocoding via Nominatim – sucht Stadtname und füllt lat/lng/Land */
   async function searchGeo() {
@@ -144,14 +254,11 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
     if (!q) { setGeoMsg({ type: "err", text: "Bitte zuerst einen Namen eingeben." }); return; }
     setGeoLoading(true);
     setGeoMsg(null);
+    setShowSuggestions(false);
     try {
       const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&addressdetails=1&accept-language=de`;
       const res = await fetch(url, { headers: { "User-Agent": "FranksFotos/1.0" } });
-      const data: Array<{
-        lat: string; lon: string;
-        display_name: string;
-        address?: { country_code?: string };
-      }> = await res.json();
+      const data: NominatimResult[] = await res.json();
       if (!data || data.length === 0) {
         setGeoMsg({ type: "err", text: `„${q}" wurde nicht gefunden.` });
         return;
@@ -159,7 +266,6 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
       const hit = data[0];
       setLat(parseFloat(hit.lat).toFixed(5));
       setLng(parseFloat(hit.lon).toFixed(5));
-      // Länderkürzel aus Ergebnis übernehmen, wenn vorhanden
       const cc = hit.address?.country_code?.toUpperCase();
       if (cc && COUNTRY_MAP.has(cc)) setCC(cc);
       setGeoMsg({ type: "ok", text: `✓ ${hit.display_name}` });
@@ -175,13 +281,18 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
     setSaving(true);
     setError(null);
     try {
-      const url = type === "city"
-        ? `/api/reisen/${mapId}/cities`
-        : `/api/reisen/${mapId}/sights`;
+      const url = isEdit
+        ? (type === "city"
+            ? `/api/reisen/${mapId}/cities/${existing!.id}`
+            : `/api/reisen/${mapId}/sights/${existing!.id}`)
+        : (type === "city"
+            ? `/api/reisen/${mapId}/cities`
+            : `/api/reisen/${mapId}/sights`);
+      const method = isEdit ? "PUT" : "POST";
       const body = type === "city"
         ? { name, countryCode, countryName, lat: lat || null, lng: lng || null, visitedBy, visitedAt: visitedAt || null, notes: notes || null }
         : { name, category, cityId: cityId || null, countryCode, countryName, lat: lat || null, lng: lng || null, visitedBy, visitedAt: visitedAt || null, notes: notes || null };
-      const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (!res.ok) { const d = await res.json(); setError(d.error ?? "Fehler"); return; }
       onSaved();
     } finally {
@@ -189,36 +300,143 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
     }
   }
 
+  /** Kategorie aus Overpass-Tags ableiten */
+  function tagToCategory(tags: OverpassPOI["tags"]): string {
+    if (tags.tourism === "museum" || tags.tourism === "gallery")      return "Museum";
+    if (tags.tourism === "viewpoint")                                  return "Aussichtspunkt";
+    if (tags.tourism === "artwork")                                    return "Denkmal";
+    if (tags.historic === "castle")                                    return "Burg/Schloss";
+    if (tags.historic === "church" || tags.historic === "cathedral")   return "Kirche/Dom";
+    if (tags.historic === "monument" || tags.historic === "memorial") return "Denkmal";
+    if (tags.tourism === "theme_park" || tags.tourism === "zoo")       return "Park";
+    if (tags.tourism === "attraction")                                  return "Sonstiges";
+    return "Sonstiges";
+  }
+
+  /** POI aus Vorschlagsliste auswählen → füllt Name, Koordinaten, Kategorie */
+  function pickPoiSuggestion(poi: OverpassPOI) {
+    setName(poi.tags.name ?? "");
+    setLat(poi.lat.toFixed(5));
+    setLng(poi.lon.toFixed(5));
+    setCategory(tagToCategory(poi.tags));
+    setGeoMsg({ type: "ok", text: `✓ ${poi.tags.name}` });
+    setShowPoiList(false);
+  }
+
+  /** Lädt Sehenswürdigkeiten aus der Umgebung via Overpass-API */
+  async function loadPoiSuggestions() {
+    // Koordinaten bestimmen (lat/lng-Felder oder ausgewählte Stadt)
+    let qLat: number | null = null;
+    let qLng: number | null = null;
+    if (lat && lng) {
+      qLat = parseFloat(lat);
+      qLng = parseFloat(lng);
+    } else if (cityId) {
+      const city = cities.find((c) => String(c.id) === cityId);
+      if (city?.lat && city?.lng) {
+        qLat = parseFloat(city.lat);
+        qLng = parseFloat(city.lng);
+      }
+    }
+    if (!qLat || !qLng || isNaN(qLat) || isNaN(qLng)) {
+      setPoiError("Bitte zuerst eine Stadt auswählen oder Koordinaten eingeben.");
+      setShowPoiList(true);
+      return;
+    }
+    setPoiLoading(true);
+    setPoiError(null);
+    setShowPoiList(true);
+    setPoiSuggestions([]);
+    try {
+      const q = `[out:json][timeout:15];(node["tourism"~"^(attraction|museum|viewpoint|artwork|gallery|theme_park|zoo)$"]["name"](around:25000,${qLat},${qLng});node["historic"~"^(castle|monument|memorial|ruins|church|cathedral)$"]["name"](around:25000,${qLat},${qLng}););out body 20;`;
+      const res = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      const pois: OverpassPOI[] = (data.elements ?? []).filter((e: OverpassPOI) => e.tags?.name);
+      setPoiSuggestions(pois.slice(0, 20));
+      if (pois.length === 0) setPoiError("Keine Sehenswürdigkeiten in der Nähe gefunden.");
+    } catch {
+      setPoiError("Vorschläge konnten nicht geladen werden (Overpass-API).");
+    } finally {
+      setPoiLoading(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (!existing) return;
+    setSaving(true);
+    const url = type === "city"
+      ? `/api/reisen/${mapId}/cities/${existing.id}`
+      : `/api/reisen/${mapId}/sights/${existing.id}`;
+    await fetch(url, { method: "DELETE" });
+    onSaved();
+  }
+
   return (
     <div className="fixed inset-0 bg-black/60 z-[2000] flex items-center justify-center p-4">
       <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
         <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
-          <h3 className="text-white font-semibold">{type === "city" ? "Stadt hinzufügen" : "Sehenswürdigkeit hinzufügen"}</h3>
+          <h3 className="text-white font-semibold">
+            {isEdit
+              ? (type === "city" ? "Stadt bearbeiten" : "Sehenswürdigkeit bearbeiten")
+              : (type === "city" ? "Stadt hinzufügen" : "Sehenswürdigkeit hinzufügen")}
+          </h3>
           <button onClick={onClose} className="text-gray-500 hover:text-white"><X className="w-5 h-5" /></button>
         </div>
         <div className="px-6 py-4 space-y-3">
+
+          {/* Name mit Autocomplete-Dropdown */}
           <div>
             <label className="block text-xs text-gray-400 mb-1">Name *</label>
-            <div className="flex gap-2">
-              <input
-                value={name}
-                onChange={(e) => { setName(e.target.value); setGeoMsg(null); }}
-                onKeyDown={(e) => e.key === "Enter" && searchGeo()}
-                className="flex-1 bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
-                placeholder={type === "city" ? "z.B. Paris" : "z.B. Eiffelturm"}
-              />
-              <button
-                type="button"
-                onClick={searchGeo}
-                disabled={geoLoading}
-                title="Koordinaten per Name suchen (Nominatim/OSM)"
-                className="flex items-center gap-1 bg-sky-700 hover:bg-sky-600 disabled:bg-sky-900 text-white px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap"
-              >
-                {geoLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
-                Suchen
-              </button>
+            <div className="relative">
+              <div className="flex gap-2">
+                <input
+                  value={name}
+                  onChange={(e) => handleNameChange(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { setShowSuggestions(false); searchGeo(); }
+                    if (e.key === "Escape") setShowSuggestions(false);
+                  }}
+                  onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                  onFocus={() => name.trim().length >= 2 && suggestions.length > 0 && setShowSuggestions(true)}
+                  className="flex-1 bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
+                  placeholder={type === "city" ? "z.B. Paris (Vorschläge beim Tippen)" : "z.B. Eiffelturm"}
+                />
+                <button
+                  type="button"
+                  onClick={searchGeo}
+                  disabled={geoLoading}
+                  title="Koordinaten per Name suchen (Nominatim/OSM)"
+                  className="flex items-center gap-1 bg-sky-700 hover:bg-sky-600 disabled:bg-sky-900 text-white px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap"
+                >
+                  {geoLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
+                  Suchen
+                </button>
+              </div>
+
+              {/* Autocomplete-Vorschlagsliste */}
+              {showSuggestions && suggestions.length > 0 && (
+                <div className="absolute z-50 top-full left-0 right-0 bg-gray-800 border border-gray-600 rounded-lg mt-1 max-h-52 overflow-y-auto shadow-2xl">
+                  {suggestions.map((hit, i) => {
+                    const primary = hit.address?.city ?? hit.address?.town ?? hit.address?.village ?? hit.display_name.split(",")[0].trim();
+                    const secondary = hit.display_name.split(",").slice(1).slice(0, 2).join(",").trim();
+                    return (
+                      <button
+                        key={i}
+                        type="button"
+                        onMouseDown={(e) => { e.preventDefault(); pickSuggestion(hit); }}
+                        className="w-full text-left px-3 py-2 hover:bg-gray-700 border-b border-gray-700/50 last:border-0 flex flex-col gap-0.5"
+                      >
+                        <span className="text-white text-sm font-medium truncate">{primary}</span>
+                        {secondary && <span className="text-gray-400 text-xs truncate">{secondary}</span>}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
+
+          {/* Kategorie & Stadt (nur für Sehenswürdigkeiten) */}
           {type === "sight" && (
             <>
               <div>
@@ -236,8 +454,50 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
                   </select>
                 </div>
               )}
+
+              {/* ── Overpass POI-Vorschläge ── */}
+              <div className="rounded-lg border border-yellow-700/40 bg-yellow-900/10 p-3">
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-xs text-yellow-400 font-medium flex items-center gap-1">
+                    <Star className="w-3 h-3" />Vorschläge aus der Umgebung
+                  </span>
+                  <button
+                    type="button"
+                    onClick={loadPoiSuggestions}
+                    disabled={poiLoading}
+                    className="text-xs text-yellow-300 hover:text-yellow-200 disabled:opacity-50 flex items-center gap-1 bg-yellow-800/40 hover:bg-yellow-700/40 px-2 py-1 rounded-md transition-colors"
+                  >
+                    {poiLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <MapPin className="w-3 h-3" />}
+                    {poiLoading ? "Lade…" : "Laden"}
+                  </button>
+                </div>
+                <p className="text-xs text-gray-500 mb-2">
+                  Koordinaten oder Stadt wählen, dann Vorschläge laden.
+                </p>
+                {poiError && <p className="text-xs text-red-400 mb-1">{poiError}</p>}
+                {showPoiList && poiSuggestions.length > 0 && (
+                  <div className="bg-gray-800 border border-gray-600 rounded-lg max-h-44 overflow-y-auto">
+                    {poiSuggestions.map((poi) => {
+                      const typeLabel = poi.tags.tourism ?? poi.tags.historic ?? poi.tags.amenity ?? "";
+                      return (
+                        <button
+                          key={poi.id}
+                          type="button"
+                          onClick={() => pickPoiSuggestion(poi)}
+                          className="w-full text-left px-3 py-2 hover:bg-gray-700 border-b border-gray-700/50 last:border-0 flex items-center justify-between gap-2"
+                        >
+                          <span className="text-white text-sm truncate">{poi.tags.name}</span>
+                          <span className="text-gray-400 text-xs whitespace-nowrap shrink-0">{typeLabel}</span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </>
           )}
+
+          {/* Land */}
           <div>
             <label className="block text-xs text-gray-400 mb-1">Land</label>
             <select value={countryCode} onChange={(e) => setCC(e.target.value)} className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500">
@@ -246,6 +506,8 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
               ))}
             </select>
           </div>
+
+          {/* Koordinaten */}
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-xs text-gray-400 mb-1">Breite (lat)</label>
@@ -256,11 +518,14 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
               <input value={lng} onChange={(e) => setLng(e.target.value)} className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" placeholder="2.3522" />
             </div>
           </div>
+
           {geoMsg && (
             <p className={`text-xs px-1 truncate ${geoMsg.type === "ok" ? "text-green-400" : "text-red-400"}`} title={geoMsg.text}>
               {geoMsg.text}
             </p>
           )}
+
+          {/* Bereist von */}
           <div>
             <label className="block text-xs text-gray-400 mb-1">Bereist von</label>
             <div className="flex gap-2">
@@ -272,23 +537,37 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
               ))}
             </div>
           </div>
+
+          {/* Datum */}
           <div>
             <label className="block text-xs text-gray-400 mb-1">Datum</label>
             <input type="date" value={visitedAt} onChange={(e) => setVisitedAt(e.target.value)} className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" />
           </div>
+
+          {/* Notiz */}
           <div>
             <label className="block text-xs text-gray-400 mb-1">Notiz</label>
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500 resize-none" maxLength={500} />
           </div>
+
           {error && <p className="text-red-400 text-xs">{error}</p>}
         </div>
-        <div className="px-6 py-4 border-t border-gray-800 flex justify-end gap-2">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-400 hover:text-white">Abbrechen</button>
-          <button onClick={handleSave} disabled={saving}
-            className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 disabled:bg-amber-500/40 text-white px-4 py-2 rounded-lg text-sm font-medium">
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
-            Hinzufügen
-          </button>
+
+        <div className="px-6 py-4 border-t border-gray-800 flex items-center justify-between">
+          {isEdit ? (
+            <button onClick={handleDelete} disabled={saving}
+              className="text-red-400 hover:text-red-300 disabled:opacity-40 text-sm flex items-center gap-1">
+              <Trash2 className="w-4 h-4" />Löschen
+            </button>
+          ) : <div />}
+          <div className="flex items-center gap-2">
+            <button onClick={onClose} className="px-4 py-2 text-sm text-gray-400 hover:text-white">Abbrechen</button>
+            <button onClick={handleSave} disabled={saving}
+              className="flex items-center gap-1.5 bg-amber-500 hover:bg-amber-400 disabled:bg-amber-500/40 text-white px-4 py-2 rounded-lg text-sm font-medium">
+              {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Check className="w-4 h-4" />}
+              {isEdit ? "Speichern" : "Hinzufügen"}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -372,18 +651,20 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
 
   // Modals
   const [countryModal, setCountryModal]   = useState<{ code: string; name: string; existing: VisitedCountry | null } | null>(null);
-  const [cityModal, setCityModal]         = useState<{ type: "city" | "sight"; lat?: number; lng?: number } | null>(null);
+  const [cityModal, setCityModal]         = useState<{
+    type: "city" | "sight";
+    lat?: number;
+    lng?: number;
+    existing?: CityMarker | SightMarker | null;
+  } | null>(null);
   const [neueKarteModal, setNeueKarteModal] = useState(false);
-
-  // Zuletzt auf der Karte angeklickte Position (für Stadt/Sehenswürdigkeit)
-  const [lastClickedPos, setLastClickedPos] = useState<{ lat: number; lng: number } | null>(null);
 
   // Welche Karte ist aktiv: Länder oder Städte/Sehenswürdigkeiten
   const [mapView, setMapView] = useState<"laender" | "staedte">("laender");
 
   // Formular-State
   const [fCountry, setFCountry] = useState("DE");
-  const [fVisitedBy, setFVBy]   = useState("user1");
+  const [fVisitedBy, setFVBy]   = useState("both");
   const [fDate, setFDate]       = useState("");
   const [fNotes, setFNotes]     = useState("");
   const [fSaving, setFSaving]   = useState(false);
@@ -405,7 +686,6 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
       const list = await res.json();
       setMaps(list);
       if (list.length > 0 && !activeMap) {
-        // Detail der ersten Karte laden
         const detail = await fetch(`/api/reisen/${list[0].id}`).then((r) => r.json());
         setActive(detail);
       } else if (activeMap) {
@@ -452,6 +732,16 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
     loadMaps();
   }
 
+  // Stadt-Marker angeklickt → Edit-Modal
+  function handleCityClick(city: CityMarker) {
+    setCityModal({ type: "city", existing: city });
+  }
+
+  // Sehenswürdigkeits-Marker angeklickt → Edit-Modal
+  function handleSightClick(sight: SightMarker) {
+    setCityModal({ type: "sight", existing: sight });
+  }
+
   async function handleFormularSave() {
     if (!activeMap) return;
     setFSaving(true);
@@ -496,11 +786,10 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
           </div>
           <div>
             <h1 className="text-2xl font-bold text-white">Meine Reisen</h1>
-<h2 className="text-gray-800 text-xl font-semibold">Bereiste Länder, Städte & Sehenswürdigkeiten</h2>
+            <h2 className="text-gray-800 text-xl font-semibold">Bereiste Länder, Städte & Sehenswürdigkeiten</h2>
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {/* Teilen-Button – für den Eigentümer der aktiven Karte */}
           {activeMap && activeMap.userId === currentUserId && (
             <button
               onClick={() => setShowShare((v) => !v)}
@@ -540,9 +829,7 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
                   onClick={handleCopy}
                   title="URL kopieren"
                   className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    copied
-                      ? "bg-green-600 text-white"
-                      : "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                    copied ? "bg-green-600 text-white" : "bg-gray-700 hover:bg-gray-600 text-gray-300"
                   }`}
                 >
                   {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
@@ -605,7 +892,7 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
           {/* Tab: Karte */}
           {activeTab === "karte" && (
             <div>
-              {/* Karten-Modus-Toggle */}
+              {/* Karten-Modus-Toggle + Toolbar */}
               <div className="flex items-center gap-2 mb-3 flex-wrap">
                 <div className="flex bg-gray-800 border border-gray-700 rounded-lg p-0.5 gap-0.5">
                   <button
@@ -622,7 +909,7 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
                       mapView === "staedte" ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"
                     }`}
                   >
-                    <MapPin className="w-3.5 h-3.5" />Städte & Sehenswürdigkeiten
+                    <MapPin className="w-3.5 h-3.5" />Städte & Sehensw.
                   </button>
                 </div>
 
@@ -632,19 +919,17 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
 
                 {mapView === "staedte" && (
                   <>
-                    {lastClickedPos && (
-                      <span className="text-xs text-gray-500 bg-gray-800 rounded px-2 py-1">
-                        📍 {lastClickedPos.lat.toFixed(3)}, {lastClickedPos.lng.toFixed(3)}
-                      </span>
-                    )}
+                    <span className="text-xs text-gray-400 hidden sm:block">
+                      📍 Karte klicken = Stadt hinzufügen · Marker klicken = bearbeiten
+                    </span>
                     <button
-                      onClick={() => setCityModal({ type: "city", lat: lastClickedPos?.lat, lng: lastClickedPos?.lng })}
+                      onClick={() => setCityModal({ type: "city" })}
                       className="ml-auto flex items-center gap-1 bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium"
                     >
                       <MapPin className="w-3.5 h-3.5" />Stadt hinzufügen
                     </button>
                     <button
-                      onClick={() => setCityModal({ type: "sight", lat: lastClickedPos?.lat, lng: lastClickedPos?.lng })}
+                      onClick={() => setCityModal({ type: "sight" })}
                       className="flex items-center gap-1 bg-yellow-600 hover:bg-yellow-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium"
                     >
                       <Star className="w-3.5 h-3.5" />Sehenswürdigkeit
@@ -653,9 +938,10 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
                 )}
               </div>
 
-              {/* Länderkarte: bereiste Länder eingefärbt, keine Stadtmarker */}
+              {/* Länderkarte: bereiste Länder eingefärbt */}
               {mapView === "laender" && (
                 <WorldMap
+                  mode="laender"
                   visitedCountries={activeMap.countries}
                   cities={[]}
                   sights={[]}
@@ -667,9 +953,10 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
                 />
               )}
 
-              {/* Städtekarte: nur Marker, keine Länderfärbung */}
+              {/* Städtekarte: helle Karte, anklickbare Marker, Kartenklick = Stadt hinzufügen */}
               {mapView === "staedte" && (
                 <WorldMap
+                  mode="staedte"
                   visitedCountries={[]}
                   cities={activeMap.cities}
                   sights={activeMap.sights}
@@ -677,7 +964,9 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
                   partnerName={activeMap.partnerName}
                   readOnly={false}
                   onCountryClick={() => {}}
-                  onMapClick={(lat, lng) => setLastClickedPos({ lat, lng })}
+                  onMapClick={(lat, lng) => setCityModal({ type: "city", lat, lng })}
+                  onCityClick={handleCityClick}
+                  onSightClick={handleSightClick}
                 />
               )}
 
@@ -787,9 +1076,15 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
 
               {/* Städte-Liste */}
               <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div className="px-5 py-3 border-b border-gray-800 flex items-center gap-2">
-                  <MapPin className="w-4 h-4 text-purple-400" />
-                  <h3 className="text-white font-medium">Städte ({activeMap.cities.length})</h3>
+                <div className="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <MapPin className="w-4 h-4 text-purple-400" />
+                    <h3 className="text-white font-medium">Städte ({activeMap.cities.length})</h3>
+                  </div>
+                  <button onClick={() => setCityModal({ type: "city" })}
+                    className="text-xs text-purple-400 hover:text-purple-300 flex items-center gap-1">
+                    <Plus className="w-3 h-3" />Hinzufügen
+                  </button>
                 </div>
                 {activeMap.cities.length === 0 ? (
                   <p className="px-5 py-6 text-gray-500 text-sm text-center">Noch keine Städte eingetragen.</p>
@@ -797,13 +1092,25 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
                   <div className="divide-y divide-gray-800/60">
                     {activeMap.cities.map((c) => (
                       <div key={c.id} className="px-5 py-3 flex items-center justify-between">
-                        <div>
-                          <span className="text-white text-sm">{c.name}</span>
-                          <span className="text-gray-500 text-xs ml-2">{COUNTRY_MAP.get(c.countryCode)?.name ?? c.countryCode}</span>
+                        <div className="flex items-center gap-3">
+                          <span className={`w-2.5 h-2.5 rounded-full ${c.visitedBy === "both" ? "bg-green-500" : c.visitedBy === "user2" ? "bg-orange-500" : "bg-blue-500"}`} />
+                          <div>
+                            <span className="text-white text-sm">{c.name}</span>
+                            <span className="text-gray-500 text-xs ml-2">{COUNTRY_MAP.get(c.countryCode)?.name ?? c.countryCode}</span>
+                            {c.lat && c.lng && (
+                              <span className="text-gray-600 text-xs ml-2">📍</span>
+                            )}
+                          </div>
                         </div>
-                        <button onClick={() => deleteCity(c.id)} className="text-gray-600 hover:text-red-400 transition-colors">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => setCityModal({ type: "city", existing: c })}
+                            className="text-gray-600 hover:text-amber-400 transition-colors">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => deleteCity(c.id)} className="text-gray-600 hover:text-red-400 transition-colors">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -812,9 +1119,15 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
 
               {/* Sehenswürdigkeiten-Liste */}
               <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
-                <div className="px-5 py-3 border-b border-gray-800 flex items-center gap-2">
-                  <Star className="w-4 h-4 text-yellow-400" />
-                  <h3 className="text-white font-medium">Sehenswürdigkeiten ({activeMap.sights.length})</h3>
+                <div className="px-5 py-3 border-b border-gray-800 flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Star className="w-4 h-4 text-yellow-400" />
+                    <h3 className="text-white font-medium">Sehenswürdigkeiten ({activeMap.sights.length})</h3>
+                  </div>
+                  <button onClick={() => setCityModal({ type: "sight" })}
+                    className="text-xs text-yellow-400 hover:text-yellow-300 flex items-center gap-1">
+                    <Plus className="w-3 h-3" />Hinzufügen
+                  </button>
                 </div>
                 {activeMap.sights.length === 0 ? (
                   <p className="px-5 py-6 text-gray-500 text-sm text-center">Noch keine Sehenswürdigkeiten eingetragen.</p>
@@ -822,13 +1135,25 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
                   <div className="divide-y divide-gray-800/60">
                     {activeMap.sights.map((s) => (
                       <div key={s.id} className="px-5 py-3 flex items-center justify-between">
-                        <div>
-                          <span className="text-white text-sm">{s.name}</span>
-                          <span className="text-gray-500 text-xs ml-2">{s.category}</span>
+                        <div className="flex items-center gap-3">
+                          <span className={`w-2.5 h-2.5 rounded-full ${s.visitedBy === "both" ? "bg-green-500" : s.visitedBy === "user2" ? "bg-orange-500" : "bg-blue-500"}`} />
+                          <div>
+                            <span className="text-white text-sm">{s.name}</span>
+                            <span className="text-gray-500 text-xs ml-2">{s.category}</span>
+                            {s.lat && s.lng && (
+                              <span className="text-gray-600 text-xs ml-2">📍</span>
+                            )}
+                          </div>
                         </div>
-                        <button onClick={() => deleteSight(s.id)} className="text-gray-600 hover:text-red-400 transition-colors">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button onClick={() => setCityModal({ type: "sight", existing: s })}
+                            className="text-gray-600 hover:text-amber-400 transition-colors">
+                            <Pencil className="w-3.5 h-3.5" />
+                          </button>
+                          <button onClick={() => deleteSight(s.id)} className="text-gray-600 hover:text-red-400 transition-colors">
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -859,6 +1184,7 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
           partnerName={activeMap.partnerName}
           initialLat={cityModal.lat}
           initialLng={cityModal.lng}
+          existing={cityModal.existing ?? null}
           onSaved={() => { setCityModal(null); loadMaps(); }}
           onClose={() => setCityModal(null)}
         />

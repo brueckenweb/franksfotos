@@ -19,6 +19,8 @@ export interface CityMarker {
   lat: string | null;
   lng: string | null;
   visitedBy: string;
+  visitedAt?: string | null;
+  notes?: string | null;
 }
 
 export interface SightMarker {
@@ -29,6 +31,9 @@ export interface SightMarker {
   lat: string | null;
   lng: string | null;
   visitedBy: string;
+  visitedAt?: string | null;
+  notes?: string | null;
+  cityId?: number | null;
 }
 
 interface WorldMapProps {
@@ -40,8 +45,12 @@ interface WorldMapProps {
   readOnly?: boolean;
   /** Höhe der Karte, z. B. "500px" oder "700px". Standard: "500px" */
   height?: string;
+  /** Kartenmodus: "laender" = Länderfärbung, "staedte" = helle Karte mit Stadtmarkern */
+  mode?: "laender" | "staedte";
   onCountryClick?: (code: string, name: string, existing: VisitedCountry | null) => void;
   onMapClick?: (lat: number, lng: number) => void;
+  onCityClick?: (city: CityMarker) => void;
+  onSightClick?: (sight: SightMarker) => void;
 }
 
 // Farben für die 3 Zustände
@@ -71,7 +80,6 @@ function normalizeCode(raw: unknown): string {
  * ISO-Code aus GeoJSON-Feature ermitteln.
  * Primär: ISO3166-1-Alpha-2 / ISO_A2.
  * Fallback: englischer Name → COUNTRY_NAME_EN_MAP
- * (einige Features im Datensatz haben "-99" als Code, z. B. Frankreich)
  */
 function resolveCode(feature: { properties?: Record<string, unknown> } | null | undefined): string {
   const props = feature?.properties ?? {};
@@ -79,7 +87,6 @@ function resolveCode(feature: { properties?: Record<string, unknown> } | null | 
     props["ISO3166-1-Alpha-2"] ?? props["ISO_A2"] ?? props["ISO_A2_EH"]
   );
   if (fromISO) return fromISO;
-  // Fallback über englischen Namen
   const nameEn = (props["name"] ?? props["NAME"] ?? props["ADMIN"] ?? props["admin"] ?? "") as string;
   return nameEn ? (COUNTRY_NAME_EN_MAP.get(nameEn.toLowerCase()) ?? "") : "";
 }
@@ -92,27 +99,36 @@ export default function WorldMap({
   partnerName,
   readOnly = false,
   height = "500px",
+  mode = "laender",
   onCountryClick,
   onMapClick,
+  onCityClick,
+  onSightClick,
 }: WorldMapProps) {
   const mapRef          = useRef<HTMLDivElement>(null);
   const leafletMapRef   = useRef<unknown>(null);
   const geoJsonLayerRef = useRef<unknown>(null);
   const [mapReady, setMapReady] = useState(false);
 
-  // ── Latest-Ref-Pattern: Props werden jeden Render aktualisiert ──────────
-  // Leaflet-Handler schreiben nie in diese Refs, lesen sie nur – kein Loop.
-  const onCountryClickRef  = useRef(onCountryClick);
-  const onMapClickRef      = useRef(onMapClick);
+  // ── Latest-Ref-Pattern ───────────────────────────────────────────────────
+  const onCountryClickRef   = useRef(onCountryClick);
+  const onMapClickRef       = useRef(onMapClick);
+  const onCityClickRef      = useRef(onCityClick);
+  const onSightClickRef     = useRef(onSightClick);
   const visitedCountriesRef = useRef(visitedCountries);
-  onCountryClickRef.current  = onCountryClick;
-  onMapClickRef.current      = onMapClick;
+  onCountryClickRef.current   = onCountryClick;
+  onMapClickRef.current       = onMapClick;
+  onCityClickRef.current      = onCityClick;
+  onSightClickRef.current     = onSightClick;
   visitedCountriesRef.current = visitedCountries;
 
-  // ── Leaflet einmalig initialisieren ────────────────────────────────────
+  const isStaedte = mode === "staedte";
+
+  // ── Leaflet einmalig initialisieren ─────────────────────────────────────
   useEffect(() => {
     if (!mapRef.current || leafletMapRef.current) return;
     let cancelled = false;
+    const staedte = isStaedte; // in Closure einfrieren
 
     import("leaflet").then((L) => {
       if (cancelled || !mapRef.current || leafletMapRef.current) return;
@@ -127,15 +143,35 @@ export default function WorldMap({
       }
 
       const map = L.map(mapRef.current!, {
-        center: [20, 0], zoom: 2, minZoom: 1, maxZoom: 10,
+        center: [20, 0],
+        zoom: 2,
+        minZoom: 1,
+        maxZoom: staedte ? 18 : 10,
         worldCopyJump: false,
         maxBounds: [[-90, -180], [90, 180]],
       });
 
-      L.tileLayer(
-        "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
-        { attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>', subdomains: "abcd", maxZoom: 19 }
-      ).addTo(map);
+      if (staedte) {
+        // CARTO Positron: helle, klare Karte – Städtenamen gut lesbar, Marker fallen auf
+        L.tileLayer(
+          "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+          {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+            subdomains: "abcd",
+            maxZoom: 19,
+          }
+        ).addTo(map);
+      } else {
+        // CARTO Voyager: für Länderfärbung
+        L.tileLayer(
+          "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+          {
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+            subdomains: "abcd",
+            maxZoom: 19,
+          }
+        ).addTo(map);
+      }
 
       leafletMapRef.current = map;
 
@@ -145,19 +181,30 @@ export default function WorldMap({
         });
       }
 
+      // Keine permanenten Labels – Tooltips nur per Hover sichtbar
+
       // GeoJSON laden
       fetch("https://raw.githubusercontent.com/datasets/geo-countries/master/data/countries.geojson")
         .then((r) => r.json())
         .then((geojson) => {
           if (cancelled) return;
 
-          // Aktuelle visitedCountries via Ref (nicht Closure-Snapshot)
           const buildVisitedMap = () => new Map<string, VisitedCountry>(
             visitedCountriesRef.current.map((v) => [v.countryCode, v])
           );
 
           const layer = L.geoJSON(geojson, {
             style: (feature) => {
+              if (staedte) {
+                // Im Städtemodus: nur ganz leichte Länderkonturen (Tile zeigt die Karte)
+                return {
+                  fillColor: "#94a3b8",
+                  weight: 0.4,
+                  opacity: 0.25,
+                  color: "#94a3b8",
+                  fillOpacity: 0,
+                };
+              }
               const code = resolveCode(feature);
               return {
                 fillColor: getCountryColor(code, buildVisitedMap()),
@@ -166,42 +213,41 @@ export default function WorldMap({
               };
             },
             onEachFeature: (feature, lyr: L.Layer) => {
-              // resolveCode: ISO3166-1-Alpha-2 mit Name-Fallback (z. B. Frankreich hat "-99")
               const code   = resolveCode(feature);
               const nameEn = (feature.properties?.name
                 ?? feature.properties?.NAME
                 ?? feature.properties?.ADMIN
                 ?? feature.properties?.admin
                 ?? "") as string;
-              // Reihenfolge: deutscher Name → englischer Name aus GeoJSON → ISO-Code → Fallback
               const nameDE = code
                 ? ((COUNTRY_MAP.get(code)?.name ?? nameEn) || code)
                 : (nameEn || code || "?");
 
-              lyr.bindTooltip(nameDE, { sticky: true, className: "travel-tooltip" });
+              // Im Ländermodus: Tooltip & Hover/Click
+              if (!staedte) {
+                lyr.bindTooltip(nameDE, { sticky: true, className: "travel-tooltip" });
 
-              if (!readOnly && code) {
-                (lyr as L.Path).on("mouseover", (e) => {
-                  const path = e.target as L.Path;
-                  if (!buildVisitedMap().get(code)) {
-                    path.setStyle({ fillColor: COLOR_HOVER, fillOpacity: 0.9 });
-                  }
-                  path.bringToFront();
-                });
-                (lyr as L.Path).on("mouseout", (e) => {
-                  const path = e.target as L.Path;
-                  path.setStyle({ fillColor: getCountryColor(code, buildVisitedMap()), fillOpacity: 0.75 });
-                });
-                (lyr as L.Path).on("click", (e: L.LeafletMouseEvent) => {
-                  // Klick nicht zur Karte weitergeben (verhindert onMapClick-Überschneidung)
-                  L.DomEvent.stopPropagation(e);
-                  const existing = buildVisitedMap().get(code) ?? null;
-                  const cb = onCountryClickRef.current;
-                  if (cb) {
-                    // setTimeout(0): React-State-Update außerhalb des Leaflet-Event-Stacks
-                    setTimeout(() => cb(code, nameDE, existing), 0);
-                  }
-                });
+                if (!readOnly && code) {
+                  (lyr as L.Path).on("mouseover", (e) => {
+                    const path = e.target as L.Path;
+                    if (!buildVisitedMap().get(code)) {
+                      path.setStyle({ fillColor: COLOR_HOVER, fillOpacity: 0.9 });
+                    }
+                    path.bringToFront();
+                  });
+                  (lyr as L.Path).on("mouseout", (e) => {
+                    const path = e.target as L.Path;
+                    path.setStyle({ fillColor: getCountryColor(code, buildVisitedMap()), fillOpacity: 0.75 });
+                  });
+                  (lyr as L.Path).on("click", (e: L.LeafletMouseEvent) => {
+                    L.DomEvent.stopPropagation(e);
+                    const existing = buildVisitedMap().get(code) ?? null;
+                    const cb = onCountryClickRef.current;
+                    if (cb) {
+                      setTimeout(() => cb(code, nameDE, existing), 0);
+                    }
+                  });
+                }
               }
             },
           });
@@ -225,9 +271,9 @@ export default function WorldMap({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── Länderfärbung aktualisieren wenn visitedCountries sich ändert ───────
+  // ── Länderfärbung aktualisieren wenn visitedCountries sich ändert ────────
   useEffect(() => {
-    if (!mapReady || !geoJsonLayerRef.current) return;
+    if (!mapReady || !geoJsonLayerRef.current || isStaedte) return;
     import("leaflet").then((L) => {
       const layer = geoJsonLayerRef.current as L.GeoJSON;
       const vm = new Map<string, VisitedCountry>(
@@ -242,9 +288,9 @@ export default function WorldMap({
         };
       });
     });
-  }, [visitedCountries, mapReady]);
+  }, [visitedCountries, mapReady, isStaedte]);
 
-  // ── Stadtmarker aktualisieren ───────────────────────────────────────────
+  // ── Stadtmarker aktualisieren ────────────────────────────────────────────
   useEffect(() => {
     if (!mapReady || !leafletMapRef.current) return;
     import("leaflet").then((L) => {
@@ -263,9 +309,40 @@ export default function WorldMap({
         const lat = parseFloat(city.lat), lng = parseFloat(city.lng);
         if (isNaN(lat) || isNaN(lng)) return;
         const color = city.visitedBy === "both" ? COLOR_BOTH : city.visitedBy === "user2" ? COLOR_USER2 : COLOR_USER1;
-        L.circleMarker([lat, lng], { radius: 6, fillColor: color, color: "#fff", weight: 1.5, fillOpacity: 0.9 })
-          .bindTooltip(`🏙️ ${city.name}`, { className: "travel-tooltip" })
-          .addTo(cityLayer);
+
+        const marker = L.circleMarker([lat, lng], {
+          radius: isStaedte ? 9 : 6,
+          fillColor: color,
+          color: "#fff",
+          weight: isStaedte ? 2.5 : 1.5,
+          fillOpacity: 0.9,
+          interactive: true,
+          bubblingMouseEvents: false,
+        }).bindTooltip(`🏙️ ${city.name}`, {
+          className: "travel-tooltip",
+          permanent: false,
+          direction: "top",
+          offset: [0, -12],
+        });
+
+        if (isStaedte) {
+          marker.on("mouseover", () => {
+            marker.setRadius(11);
+            marker.setStyle({ weight: 3 });
+          });
+          marker.on("mouseout", () => {
+            marker.setRadius(9);
+            marker.setStyle({ weight: 2.5 });
+          });
+          if (!readOnly && onCityClickRef.current) {
+            marker.on("click", (e: L.LeafletMouseEvent) => {
+              L.DomEvent.stopPropagation(e);
+              setTimeout(() => onCityClickRef.current?.(city), 0);
+            });
+          }
+        }
+
+        marker.addTo(cityLayer);
       });
 
       sights.forEach((sight) => {
@@ -273,49 +350,92 @@ export default function WorldMap({
         const lat = parseFloat(sight.lat), lng = parseFloat(sight.lng);
         if (isNaN(lat) || isNaN(lng)) return;
         const color = sight.visitedBy === "both" ? COLOR_BOTH : sight.visitedBy === "user2" ? COLOR_USER2 : COLOR_USER1;
-        L.circleMarker([lat, lng], { radius: 5, fillColor: color, color: "#f59e0b", weight: 1.5, fillOpacity: 0.9 })
-          .bindTooltip(`⭐ ${sight.name}`, { className: "travel-tooltip" })
-          .addTo(cityLayer);
+
+        const marker = L.circleMarker([lat, lng], {
+          radius: isStaedte ? 7 : 5,
+          fillColor: color,
+          color: "#f59e0b",
+          weight: isStaedte ? 2 : 1.5,
+          fillOpacity: 0.9,
+          interactive: true,
+          bubblingMouseEvents: false,
+        }).bindTooltip(`⭐ ${sight.name}`, {
+          className: "travel-tooltip",
+          permanent: false,
+          direction: "top",
+          offset: [0, -10],
+        });
+
+        if (isStaedte) {
+          marker.on("mouseover", () => {
+            marker.setRadius(9);
+            marker.setStyle({ weight: 3 });
+          });
+          marker.on("mouseout", () => {
+            marker.setRadius(7);
+            marker.setStyle({ weight: 2 });
+          });
+          if (!readOnly && onSightClickRef.current) {
+            marker.on("click", (e: L.LeafletMouseEvent) => {
+              L.DomEvent.stopPropagation(e);
+              setTimeout(() => onSightClickRef.current?.(sight), 0);
+            });
+          }
+        }
+
+        marker.addTo(cityLayer);
       });
     });
-  }, [cities, sights, mapReady]);
+  }, [cities, sights, mapReady, isStaedte]);
 
   return (
     <div className="relative w-full">
       <div
         ref={mapRef}
-        className="w-full rounded-xl overflow-hidden border border-gray-700"
-        style={{ height, background: "#111827" }}
+        className={`w-full rounded-xl overflow-hidden border ${
+          isStaedte ? "border-purple-500/40" : "border-gray-700"
+        }`}
+        style={{ height, background: isStaedte ? "#f5f4f2" : "#111827" }}
       />
 
       {/* Legende */}
-      <div className="absolute bottom-4 left-4 bg-gray-900/90 border border-gray-700 rounded-lg px-3 py-2 text-xs space-y-1 z-[1000]">
+      <div className={`absolute bottom-4 left-4 rounded-lg px-3 py-2 text-xs space-y-1 z-[1000] ${
+        isStaedte
+          ? "bg-white/95 border border-gray-300 shadow-md"
+          : "bg-gray-900/90 border border-gray-700"
+      }`}>
         <div className="flex items-center gap-2">
           <span className="w-3 h-3 rounded-sm inline-block" style={{ background: COLOR_USER1 }} />
-          <span className="text-gray-300">{ownerName}</span>
+          <span className={isStaedte ? "text-gray-700" : "text-gray-300"}>{ownerName}</span>
         </div>
         {partnerName && (
           <div className="flex items-center gap-2">
             <span className="w-3 h-3 rounded-sm inline-block" style={{ background: COLOR_USER2 }} />
-            <span className="text-gray-300">{partnerName}</span>
+            <span className={isStaedte ? "text-gray-700" : "text-gray-300"}>{partnerName}</span>
           </div>
         )}
         <div className="flex items-center gap-2">
           <span className="w-3 h-3 rounded-sm inline-block" style={{ background: COLOR_BOTH }} />
-          <span className="text-gray-300">Gemeinsam</span>
+          <span className={isStaedte ? "text-gray-700" : "text-gray-300"}>Gemeinsam</span>
         </div>
-        <div className="flex items-center gap-2">
-          <span className="w-3 h-3 rounded-sm inline-block" style={{ background: COLOR_NONE }} />
-          <span className="text-gray-400">Nicht bereist</span>
-        </div>
-        <div className="border-t border-gray-700 pt-1 mt-1 space-y-0.5">
+        {!isStaedte && (
           <div className="flex items-center gap-2">
-            <span className="text-blue-300">●</span>
-            <span className="text-gray-400">Stadt</span>
+            <span className="w-3 h-3 rounded-sm inline-block" style={{ background: COLOR_NONE }} />
+            <span className="text-gray-400">Nicht bereist</span>
+          </div>
+        )}
+        <div className={`border-t pt-1 mt-1 space-y-0.5 ${isStaedte ? "border-gray-300" : "border-gray-700"}`}>
+          <div className="flex items-center gap-2">
+            <span style={{ color: COLOR_USER1 }}>●</span>
+            <span className={isStaedte ? "text-gray-500" : "text-gray-400"}>
+              {isStaedte && !readOnly ? "Stadt (klickbar)" : "Stadt"}
+            </span>
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-yellow-400">●</span>
-            <span className="text-gray-400">Sehenswürdigkeit</span>
+            <span className="text-yellow-500">●</span>
+            <span className={isStaedte ? "text-gray-500" : "text-gray-400"}>
+              {isStaedte && !readOnly ? "Sehenswürd. (klickbar)" : "Sehenswürdigkeit"}
+            </span>
           </div>
         </div>
       </div>
