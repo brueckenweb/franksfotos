@@ -778,7 +778,7 @@ export default async function AlbumPage({ params }: Props) {
               {albumPhotos.map((photo) => (
                 <Link
                   key={photo.id}
-                  href={`/foto/${photo.id}`}
+                  href={isTagAlbum ? `/foto/${photo.id}?from=${album.slug}` : `/foto/${photo.id}`}
                   className="group relative bg-gray-900 border border-gray-800 rounded-lg overflow-hidden hover:border-amber-500/50 transition-colors"
                 >
                   <div className="aspect-square bg-gray-800 overflow-hidden">

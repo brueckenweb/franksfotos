@@ -11,6 +11,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import AlbumTreeSelect from "@/app/admin/alben/AlbumTreeSelect";
+import ImageCropSelector, { type CropRect } from "./ImageCropSelector";
 import {
   RefreshCw,
   RotateCcw,
@@ -28,7 +29,7 @@ import {
   Tag,
   X,
   ChevronDown,
-  FolderOpen,
+  Scissors,
   Trash2,
 } from "lucide-react";
 
@@ -162,9 +163,16 @@ export default function FotodatenbankEingabe() {
 
   const [deleting,    setDeleting]    = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [isPortrait,  setIsPortrait]  = useState(false);
+
+  // ── Bildausschnitt (Crop) ──
+  const [cropRect, setCropRect] = useState<CropRect | null>(null);
 
   const [basUebernehmen, setBasUebernehmen] = useState(false);
   const basUebernehmenRef = useRef(false);
+
+  const [ortFesthalten,  setOrtFesthalten]  = useState(false);
+  const ortFesthaltenRef = useRef(false);
 
   // ── Fotogalerie State ──
   const [galAlben,            setGalAlben]            = useState<AlbumOption[]>([]);
@@ -199,6 +207,8 @@ export default function FotodatenbankEingabe() {
     setLeer(false);
     setScanData(null);
     setPreviewUrl(null);
+    setIsPortrait(false);
+    setCropRect(null);
 
     try {
       // 1. Lokaler Server: Ordner scannen + EXIF
@@ -282,7 +292,9 @@ export default function FotodatenbankEingabe() {
         gpslaenge:      localData.exif.gpsLaenge,
         gpshoehe:       localData.exif.gpsHoehe,
         land:     serverData.geoLand || serverData.letzterEintrag?.land  || prev.land,
-        ort:      serverData.geoOrt  || serverData.letzterEintrag?.ort   || prev.ort,
+        ort:      ortFesthaltenRef.current
+                    ? prev.ort
+                    : (serverData.geoOrt || serverData.letzterEintrag?.ort || prev.ort),
         fotograf: serverData.letzterEintrag?.fotograf ?? prev.fotograf,
         idfgruppe: String(serverData.letzteIdfgruppe ?? prev.idfgruppe ?? ""),
       }));
@@ -406,6 +418,7 @@ export default function FotodatenbankEingabe() {
           baseName:        scanData.baseName,
           generateBas,
           generateGalerie,
+          crop:            cropRect,   // null oder { x, y, w, h } – normalisiert 0–1
         }),
       });
 
@@ -687,17 +700,58 @@ export default function FotodatenbankEingabe() {
             </div>
           ) : previewUrl ? (
             <div>
-              <a href={previewUrl} target="_blank" rel="noopener noreferrer">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={previewUrl}
-                  alt="Vorschau"
-                  className="w-full max-h-[450px] object-contain rounded-lg bg-gray-800"
-                />
-              </a>
-              <div className="text-gray-500 text-xs mt-1 text-center">
-                {scanData?.baseName}
+              {/* Crop-Selektor: Bild auf Canvas + Rechteck-Auswahl */}
+              <ImageCropSelector
+                src={previewUrl}
+                isPortrait={isPortrait}
+                cropRect={cropRect}
+                onCropChange={setCropRect}
+                onImageLoad={(w, h) => setIsPortrait(h > w)}
+              />
+
+              {/* Legende + Steuerung unterhalb des Bilds */}
+              <div className="flex items-center justify-between mt-2 gap-2">
+                <div className="text-gray-500 text-xs">
+                  {scanData?.baseName}
+                  {isPortrait && (
+                    <span className="ml-2 text-amber-500/70">↕ Hochkant</span>
+                  )}
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <a
+                    href={previewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-gray-500 hover:text-gray-300 text-xs transition-colors"
+                    title="Vorschau in vollem Umfang öffnen"
+                  >
+                    🔍 Vollbild
+                  </a>
+                  {cropRect && (
+                    <button
+                      type="button"
+                      onClick={() => setCropRect(null)}
+                      className="inline-flex items-center gap-1 text-xs text-amber-400 hover:text-amber-300 transition-colors"
+                      title="Bildausschnitt zurücksetzen"
+                    >
+                      <X className="w-3 h-3" />
+                      Auswahl löschen
+                    </button>
+                  )}
+                </div>
               </div>
+
+              {/* Hinweis wenn Crop aktiv */}
+              {cropRect ? (
+                <div className="mt-2 flex items-center gap-2 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2 text-xs text-amber-300">
+                  <Scissors className="w-3.5 h-3.5 flex-shrink-0" />
+                  <span>Bildausschnitt aktiv – wird für BAS &amp; Fotogalerie verwendet</span>
+                </div>
+              ) : (
+                <div className="mt-2 text-gray-600 text-xs text-center">
+                  ↖ Rechteck auf dem Bild ziehen, um einen Ausschnitt zu wählen
+                </div>
+              )}
             </div>
           ) : (
             <div className="flex items-center justify-center h-48 bg-gray-800 rounded-lg">
@@ -744,9 +798,29 @@ export default function FotodatenbankEingabe() {
                 className="input-field" />
             </Row>
             <Row label="Stadt/Ort">
-              <input type="text" value={form.ort}
-                onChange={(e) => setField("ort", e.target.value)}
-                className="input-field" />
+              <div className="flex items-center gap-2 flex-1">
+                <input type="text" value={form.ort}
+                  onChange={(e) => setField("ort", e.target.value)}
+                  className="input-field flex-1" />
+                <button
+                  type="button"
+                  onClick={() => {
+                    const next = !ortFesthalten;
+                    ortFesthaltenRef.current = next;
+                    setOrtFesthalten(next);
+                  }}
+                  title={ortFesthalten
+                    ? "Ort festgehalten – klicken zum Deaktivieren"
+                    : "Ort wird automatisch befüllt – klicken zum Festhalten"}
+                  className={`flex-shrink-0 w-10 h-6 rounded-full relative transition-colors focus:outline-none ${
+                    ortFesthalten ? "bg-amber-600" : "bg-gray-600"
+                  }`}
+                >
+                  <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${
+                    ortFesthalten ? "translate-x-4" : "translate-x-0"
+                  }`} />
+                </button>
+              </div>
             </Row>
             <Row label="Bildtitel">
               <input type="text" value={form.titel}

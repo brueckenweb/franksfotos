@@ -1,34 +1,52 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Save, Loader2 } from "lucide-react";
+
+type Group = { id: number; name: string; slug: string; description: string | null };
 
 export default function NeuerBenutzerPage() {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  // Alle verfügbaren Gruppen aus DB
+  const [allGroups, setAllGroups] = useState<Group[]>([]);
+  // Vorauswahl: "user"-Gruppe, falls vorhanden
+  const [selectedGroupSlugs, setSelectedGroupSlugs] = useState<Set<string>>(new Set(["user"]));
+
   const [form, setForm] = useState({
     name: "",
     email: "",
     password: "",
     isActive: true,
-    groupAdmin: false,
-    groupUser: true,
-    groupFamilie: false,
   });
+
+  // Gruppen beim Laden der Seite aus der API holen
+  useEffect(() => {
+    fetch("/api/groups")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.groups) setAllGroups(data.groups);
+      })
+      .catch(() => {/* ignorieren, Fallback: leere Liste */});
+  }, []);
+
+  function toggleGroup(slug: string) {
+    setSelectedGroupSlugs((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
+    });
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
-
-    const groupSlugs = [];
-    if (form.groupAdmin) groupSlugs.push("admin");
-    if (form.groupUser) groupSlugs.push("user");
-    if (form.groupFamilie) groupSlugs.push("familie");
 
     try {
       const res = await fetch("/api/users", {
@@ -39,7 +57,7 @@ export default function NeuerBenutzerPage() {
           email: form.email,
           password: form.password,
           isActive: form.isActive,
-          groupSlugs,
+          groupSlugs: Array.from(selectedGroupSlugs),
         }),
       });
 
@@ -122,26 +140,29 @@ export default function NeuerBenutzerPage() {
           <p className="text-gray-600 text-xs mt-1">Mindestens 8 Zeichen</p>
         </div>
 
+        {/* Gruppen – dynamisch aus DB */}
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-2">Gruppen</label>
-          <div className="space-y-2">
-            {[
-              { key: "groupAdmin", label: "Admin", slug: "admin", desc: "Vollzugriff" },
-              { key: "groupUser", label: "Benutzer", slug: "user", desc: "Kommentare, Likes, Downloads" },
-              { key: "groupFamilie", label: "Familie", slug: "familie", desc: "Kommentare, Upload" },
-            ].map((g) => (
-              <label key={g.key} className="flex items-center gap-2.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={form[g.key as keyof typeof form] as boolean}
-                  onChange={(e) => setForm((p) => ({ ...p, [g.key]: e.target.checked }))}
-                  className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-amber-500"
-                />
-                <span className="text-gray-300 text-sm font-medium">{g.label}</span>
-                <span className="text-gray-500 text-xs">– {g.desc}</span>
-              </label>
-            ))}
-          </div>
+          {allGroups.length === 0 ? (
+            <p className="text-xs text-gray-600">Gruppen werden geladen…</p>
+          ) : (
+            <div className="space-y-2">
+              {allGroups.map((g) => (
+                <label key={g.slug} className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={selectedGroupSlugs.has(g.slug)}
+                    onChange={() => toggleGroup(g.slug)}
+                    className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-amber-500"
+                  />
+                  <span className="text-gray-300 text-sm font-medium">{g.name}</span>
+                  {g.description && (
+                    <span className="text-gray-500 text-xs">– {g.description}</span>
+                  )}
+                </label>
+              ))}
+            </div>
+          )}
         </div>
 
         <div>

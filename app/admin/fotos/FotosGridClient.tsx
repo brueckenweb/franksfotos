@@ -393,7 +393,7 @@ export default function FotosGridClient({
                           <Eye className="w-3.5 h-3.5" />
                         </Link>
                         <Link
-                          href={`/admin/fotos/${photo.id}/edit`}
+                          href={`/admin/fotos/${photo.id}/edit?page=${safePage}`}
                           className="bg-white/90 hover:bg-white text-gray-900 rounded-full p-1.5 transition-colors"
                           title="Bearbeiten"
                         >

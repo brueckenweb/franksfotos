@@ -1,17 +1,21 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
+import LocalDate from "@/components/LocalDate";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { photos, albums, comments, users, likes, tags, tagGroups, photoTags, photoGroupVisibility, photoUserAccess, userGroups } from "@/lib/db/schema";
 import { eq, and, count, asc, inArray } from "drizzle-orm";
-import { ArrowLeft, ChevronLeft, ChevronRight, Download, FolderOpen, Lock, MessageSquare, Pencil, User } from "lucide-react";
+import { ArrowLeft, ChevronLeft, ChevronRight, Download, FolderOpen, Lock, MessageSquare, Pencil, Tag, User } from "lucide-react";
 import LikeButton from "./LikeButton";
 import CommentForm from "./CommentForm";
 import TagInput from "./TagInput";
 import ExifBox from "./ExifBox";
 import PhotoZoom from "./PhotoZoom";
 
-type Props = { params: Promise<{ id: string }> };
+type Props = {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ from?: string }>;
+};
 
 async function getPhoto(id: number) {
   try {
@@ -116,6 +120,68 @@ async function getAlbumNeighbors(
   }
 }
 
+/**
+ * Lädt die Nachbarn eines Fotos im Kontext eines Tag-Albums.
+ * Gibt außerdem den Album-Namen und -Slug zurück.
+ */
+async function getTagAlbumContext(
+  tagAlbumSlug: string,
+  photoId: number
+): Promise<{
+  albumName: string;
+  albumSlug: string;
+  prevId: number | null;
+  nextId: number | null;
+} | null> {
+  try {
+    // Tag-Album laden
+    const albumRows = await db
+      .select({
+        id: albums.id,
+        name: albums.name,
+        slug: albums.slug,
+        tagId: albums.tagId,
+        sourceType: albums.sourceType,
+        photoSortMode: albums.photoSortMode,
+      })
+      .from(albums)
+      .where(eq(albums.slug, tagAlbumSlug))
+      .limit(1);
+
+    const album = albumRows[0];
+    if (!album || album.sourceType !== "tag" || !album.tagId) return null;
+
+    // Alle Foto-IDs dieses Tags laden (gleiche Reihenfolge wie im Album)
+    const taggedRows = await db
+      .select({ photoId: photoTags.photoId })
+      .from(photoTags)
+      .where(eq(photoTags.tagId, album.tagId));
+
+    const taggedIds = taggedRows.map((r) => r.photoId);
+    if (taggedIds.length === 0) return null;
+
+    // Fotos in richtiger Reihenfolge laden
+    const tagPhotos = await db
+      .select({ id: photos.id, createdAt: photos.createdAt, sortOrder: photos.sortOrder })
+      .from(photos)
+      .where(and(inArray(photos.id, taggedIds), eq(photos.isPrivate, false)))
+      .orderBy(asc(photos.createdAt));
+
+    const ids = tagPhotos.map((p) => p.id);
+    const idx = ids.indexOf(photoId);
+    if (idx === -1) return null;
+
+    return {
+      albumName: album.name,
+      albumSlug: album.slug,
+      prevId: idx > 0 ? ids[idx - 1] : null,
+      nextId: idx < ids.length - 1 ? ids[idx + 1] : null,
+    };
+  } catch {
+    return null;
+  }
+}
+
 async function getPhotoTags(photoId: number): Promise<any[]> {
   try {
     return await db
@@ -137,8 +203,9 @@ async function getPhotoTags(photoId: number): Promise<any[]> {
   }
 }
 
-export default async function FotoPage({ params }: Props) {
+export default async function FotoPage({ params, searchParams }: Props) {
   const { id } = await params;
+  const { from } = await searchParams;
   const photoId = parseInt(id);
 
   if (isNaN(photoId)) notFound();
@@ -202,13 +269,34 @@ export default async function FotoPage({ params }: Props) {
     }
   }
 
+  // Tag-Album-Kontext laden (wenn `from` gesetzt ist)
+  const tagContext = from ? await getTagAlbumContext(from, photoId) : null;
+
   const [photoComments, likeCount, userHasLiked, fetchedPhotoTags, neighbors] = await Promise.all([
     getPhotoComments(photoId),
     getLikeCount(photoId),
     userId ? getUserHasLiked(photoId, userId) : Promise.resolve(false),
     getPhotoTags(photoId),
-    getAlbumNeighbors(photoId, photo.albumId ?? null),
+    // Nachbarn: Tag-Kontext hat Vorrang vor normalem Album
+    tagContext
+      ? Promise.resolve({ prevId: tagContext.prevId, nextId: tagContext.nextId })
+      : getAlbumNeighbors(photoId, photo.albumId ?? null),
   ]) as [any[], number, boolean, any[], { prevId: number | null; nextId: number | null }];
+
+  // Hilfsfunktion: Foto-URL mit optionalem ?from= Parameter
+  const fotoUrl = (fotoId: number) =>
+    tagContext ? `/foto/${fotoId}?from=${tagContext.albumSlug}` : `/foto/${fotoId}`;
+
+  // Zurück-Link: Tag-Album hat Vorrang
+  const backHref = tagContext
+    ? `/alben/${tagContext.albumSlug}`
+    : photo.albumSlug
+    ? `/alben/${photo.albumSlug}`
+    : "/alben";
+
+  const backLabel = tagContext
+    ? tagContext.albumName
+    : photo.albumName ?? null;
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -217,22 +305,35 @@ export default async function FotoPage({ params }: Props) {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex items-center h-14 gap-3 min-w-0">
             <Link
-              href={photo.albumSlug ? `/alben/${photo.albumSlug}` : "/alben"}
+              href={backHref}
               className="text-gray-400 hover:text-white transition-colors flex-shrink-0"
             >
               <ArrowLeft className="w-5 h-5" />
             </Link>
-            {photo.albumName && photo.albumSlug && (
+            {tagContext ? (
               <>
-                <FolderOpen className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                <Tag className="w-4 h-4 text-amber-400 flex-shrink-0" />
                 <Link
-                  href={`/alben/${photo.albumSlug}`}
+                  href={`/alben/${tagContext.albumSlug}`}
                   className="text-gray-400 hover:text-white text-sm transition-colors truncate hidden sm:block"
                 >
-                  {photo.albumName}
+                  {tagContext.albumName}
                 </Link>
                 <span className="text-gray-700 hidden sm:block">/</span>
               </>
+            ) : (
+              photo.albumName && photo.albumSlug && (
+                <>
+                  <FolderOpen className="w-4 h-4 text-amber-400 flex-shrink-0" />
+                  <Link
+                    href={`/alben/${photo.albumSlug}`}
+                    className="text-gray-400 hover:text-white text-sm transition-colors truncate hidden sm:block"
+                  >
+                    {photo.albumName}
+                  </Link>
+                  <span className="text-gray-700 hidden sm:block">/</span>
+                </>
+              )
             )}
             <span className="text-white text-sm truncate font-medium">
               {photo.description || photo.title || photo.filename}
@@ -260,7 +361,7 @@ export default async function FotoPage({ params }: Props) {
               <div className="flex items-center justify-between gap-3">
                 {neighbors.prevId ? (
                   <Link
-                    href={`/foto/${neighbors.prevId}`}
+                    href={fotoUrl(neighbors.prevId)}
                     className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-600 text-white rounded-lg text-sm font-medium transition-colors"
                     title="Vorheriges Foto"
                   >
@@ -271,20 +372,18 @@ export default async function FotoPage({ params }: Props) {
                   <div />
                 )}
 
-                {/* Albumlink in der Mitte */}
-                {photo.albumSlug && (
-                  <Link
-                    href={`/alben/${photo.albumSlug}`}
-                    className="text-xs text-gray-500 hover:text-gray-300 transition-colors truncate max-w-[140px] text-center"
-                    title={`Zurück zum Album: ${photo.albumName}`}
-                  >
-                    {photo.albumName}
-                  </Link>
-                )}
+                {/* Album-/Tag-Album-Link in der Mitte */}
+                <Link
+                  href={backHref}
+                  className="text-xs text-gray-500 hover:text-gray-300 transition-colors truncate max-w-[140px] text-center"
+                  title={`Zurück: ${backLabel}`}
+                >
+                  {backLabel}
+                </Link>
 
                 {neighbors.nextId ? (
                   <Link
-                    href={`/foto/${neighbors.nextId}`}
+                    href={fotoUrl(neighbors.nextId)}
                     className="flex items-center gap-2 px-4 py-2 bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-600 text-white rounded-lg text-sm font-medium transition-colors"
                     title="Nächstes Foto"
                   >
@@ -318,7 +417,21 @@ export default async function FotoPage({ params }: Props) {
                 {photo.filename}
               </p>
 
-              {/* Album */}
+              {/* Tag-Album-Kontext (wenn vorhanden) */}
+              {tagContext && (
+                <p className="text-xs text-gray-500 mb-1">
+                  Tag-Album:{" "}
+                  <Link
+                    href={`/alben/${tagContext.albumSlug}`}
+                    className="text-amber-400 hover:text-amber-300 inline-flex items-center gap-1"
+                  >
+                    <Tag className="w-3 h-3" />
+                    {tagContext.albumName}
+                  </Link>
+                </p>
+              )}
+
+              {/* Original-Album (immer anzeigen) */}
               {photo.albumName && photo.albumSlug && (
                 <p className="text-xs text-gray-500 mb-1">
                   Album:{" "}
@@ -355,11 +468,10 @@ export default async function FotoPage({ params }: Props) {
                 )}
                 <p>
                   <span className="text-gray-500">Hochgeladen am:</span>{" "}
-                  {new Date(photo.createdAt).toLocaleDateString("de-DE", {
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                  })}
+                  <LocalDate
+                    dateStr={photo.createdAt.toISOString()}
+                    options={{ year: "numeric", month: "long", day: "numeric" }}
+                  />
                 </p>
               </div>
             </div>
@@ -456,22 +568,6 @@ export default async function FotoPage({ params }: Props) {
               />
             </div>
 
-            {/* BrückenWeb-Link */}
-            {photo.bnummer && (
-              <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-                <p className="text-xs text-gray-500">
-                  Brücken-Nr.:{" "}
-                  <a
-                    href={`https://brueckenweb.de/bruecken/${photo.bnummer}`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="text-amber-400 hover:text-amber-300 font-mono"
-                  >
-                    {photo.bnummer}
-                  </a>
-                </p>
-              </div>
-            )}
           </div>
         </div>
       </div>

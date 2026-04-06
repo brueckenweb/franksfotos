@@ -70,6 +70,8 @@ export default function EditAlbumPage() {
   const [allAlbums, setAllAlbums] = useState<AlbumOption[]>([]);
   const [availableTags, setAvailableTags] = useState<TagOption[]>([]);
   const [tagsLoading, setTagsLoading] = useState(false);
+  const [groups, setGroups] = useState<{ id: number; name: string; slug: string; description: string | null }[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(true);
 
   // Cover-Foto: Tab + Suche
   const [coverTab, setCoverTab] = useState<"album" | "search">("album");
@@ -88,9 +90,7 @@ export default function EditAlbumPage() {
     photoSortMode: "created_asc",
     isActive: true,
     coverPhotoId: "",
-    visibleForPublic: false,
-    visibleForUser: false,
-    visibleForFamilie: false,
+    visibleForGroups: [] as string[],
     sourceType: "own" as "own" | "tag",
     tagId: "",
   });
@@ -103,6 +103,16 @@ export default function EditAlbumPage() {
       .then((data) => setAvailableTags(Array.isArray(data) ? data : (data.tags ?? [])))
       .catch(() => {})
       .finally(() => setTagsLoading(false));
+  }, []);
+
+  // Usergruppen laden
+  useEffect(() => {
+    setGroupsLoading(true);
+    fetch("/api/groups")
+      .then((r) => r.json())
+      .then((data) => setGroups(data.groups ?? []))
+      .catch(() => {})
+      .finally(() => setGroupsLoading(false));
   }, []);
 
   useEffect(() => {
@@ -118,7 +128,7 @@ export default function EditAlbumPage() {
         const allAlbumsData = await allAlbumsRes.json();
 
         if (albumData.album) {
-          const vis =
+          const vis: string[] =
             albumData.visibility?.map((v: { groupSlug: string }) => v.groupSlug) ?? [];
           setForm({
             name: albumData.album.name,
@@ -132,9 +142,7 @@ export default function EditAlbumPage() {
             coverPhotoId: albumData.album.coverPhotoId
               ? String(albumData.album.coverPhotoId)
               : "",
-            visibleForPublic: vis.includes("public"),
-            visibleForUser: vis.includes("user"),
-            visibleForFamilie: vis.includes("familie"),
+            visibleForGroups: vis,
             sourceType: albumData.album.sourceType === "tag" ? "tag" : "own",
             tagId: albumData.album.tagId ? String(albumData.album.tagId) : "",
           });
@@ -182,11 +190,6 @@ export default function EditAlbumPage() {
     setError("");
     setLoading(true);
 
-    const visibleForGroups = [];
-    if (form.visibleForPublic) visibleForGroups.push("public");
-    if (form.visibleForUser) visibleForGroups.push("user");
-    if (form.visibleForFamilie) visibleForGroups.push("familie");
-
     try {
       const res = await fetch(`/api/albums/${albumId}`, {
         method: "PUT",
@@ -201,7 +204,7 @@ export default function EditAlbumPage() {
           photoSortMode: form.photoSortMode,
           isActive: form.isActive,
           coverPhotoId: form.coverPhotoId ? parseInt(form.coverPhotoId) : null,
-          visibleForGroups,
+          visibleForGroups: form.visibleForGroups,
           sourceType: form.sourceType,
           tagId: form.sourceType === "tag" && form.tagId ? parseInt(form.tagId) : null,
         }),
@@ -619,24 +622,37 @@ export default function EditAlbumPage() {
 
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-2">Sichtbar für</label>
-          <div className="space-y-2">
-            {[
-              { key: "visibleForPublic", label: "Öffentlich (kein Login)", slug: "public" },
-              { key: "visibleForUser", label: "Benutzer (eingeloggt)", slug: "user" },
-              { key: "visibleForFamilie", label: "Familie", slug: "familie" },
-            ].map((group) => (
-              <label key={group.key} className="flex items-center gap-2.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={form[group.key as keyof typeof form] as boolean}
-                  onChange={(e) => setForm((p) => ({ ...p, [group.key]: e.target.checked }))}
-                  className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-amber-500"
-                />
-                <span className="text-gray-300 text-sm">{group.label}</span>
-                <span className="text-gray-600 text-xs font-mono">{group.slug}</span>
-              </label>
-            ))}
-          </div>
+          {groupsLoading ? (
+            <div className="flex items-center gap-2 text-gray-500 text-sm py-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Gruppen werden geladen…
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {groups.map((group) => (
+                <label key={group.slug} className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.visibleForGroups.includes(group.slug)}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        visibleForGroups: e.target.checked
+                          ? [...p.visibleForGroups, group.slug]
+                          : p.visibleForGroups.filter((s) => s !== group.slug),
+                      }))
+                    }
+                    className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-amber-500 focus:ring-amber-500 focus:ring-offset-gray-900"
+                  />
+                  <span className="text-gray-300 text-sm">{group.name}</span>
+                  <span className="text-gray-600 text-xs font-mono">{group.slug}</span>
+                </label>
+              ))}
+              {groups.length === 0 && (
+                <p className="text-gray-500 text-sm">Keine Gruppen vorhanden.</p>
+              )}
+            </div>
+          )}
         </div>
 
         <div className="flex items-center gap-3 pt-2">

@@ -7,7 +7,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import Link from "next/link";
-import { Database, LayoutDashboard, List } from "lucide-react";
+import { Database, LayoutDashboard, List, Search, Images } from "lucide-react";
 
 export const metadata: Metadata = {
   title: "Fotodatenbank – FranksFotos",
@@ -59,11 +59,25 @@ export default async function FotodatenbankLayout({
               <span className="hidden sm:inline">Eingabe</span>
             </Link>
             <Link
+              href="/fotodatenbank/datenbank"
+              className="flex items-center gap-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg px-3 py-2 text-sm transition-colors"
+            >
+              <Search className="w-4 h-4" />
+              <span className="hidden sm:inline">Datenbank</span>
+            </Link>
+            <Link
               href="/fotodatenbank/fotogruppen"
               className="flex items-center gap-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg px-3 py-2 text-sm transition-colors"
             >
               <List className="w-4 h-4" />
               <span className="hidden sm:inline">Fotogruppen</span>
+            </Link>
+            <Link
+              href="/admin/fotos"
+              className="flex items-center gap-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg px-3 py-2 text-sm transition-colors"
+            >
+              <Images className="w-4 h-4" />
+              <span className="hidden sm:inline">Fotogalerie</span>
             </Link>
             <Link
               href="/admin"

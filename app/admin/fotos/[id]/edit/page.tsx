@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter, useParams } from "next/navigation";
+import { useRouter, useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Save, Loader2, Tag as TagIcon, Users, Lock, ChevronDown } from "lucide-react";
 import PhotoZoom from "@/app/foto/[id]/PhotoZoom";
@@ -27,7 +27,12 @@ interface Group {
 export default function EditFotoPage() {
   const router = useRouter();
   const params = useParams();
+  const searchParams = useSearchParams();
   const photoId = params.id as string;
+
+  // Seite, von der aus die Bearbeitung geöffnet wurde – für den Rücksprung
+  const backPage = searchParams.get("page");
+  const backUrl = backPage && backPage !== "1" ? `/admin/fotos?page=${backPage}` : "/admin/fotos";
 
   const [loading, setLoading] = useState(false);
   const [fetching, setFetching] = useState(true);
@@ -155,7 +160,7 @@ export default function EditFotoPage() {
         return;
       }
 
-      router.push("/admin/fotos");
+      router.push(backUrl);
       router.refresh();
     } catch {
       setError("Netzwerkfehler");
@@ -176,7 +181,7 @@ export default function EditFotoPage() {
     <div className="max-w-6xl">
       {/* Header */}
       <div className="flex items-center gap-3 mb-6">
-        <Link href="/admin/fotos" className="text-gray-400 hover:text-white transition-colors">
+        <Link href={backUrl} className="text-gray-400 hover:text-white transition-colors">
           <ArrowLeft className="w-5 h-5" />
         </Link>
         <div>
@@ -405,7 +410,7 @@ export default function EditFotoPage() {
                 Speichern
               </button>
               <Link
-                href="/admin/fotos"
+                href={backUrl}
                 className="text-gray-400 hover:text-white text-sm transition-colors"
               >
                 Abbrechen

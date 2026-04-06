@@ -2,7 +2,7 @@
 ' Diese Datei als Desktop-Verknüpfung ablegen.
 '
 ' HINWEIS: Das Fenster ist bewusst versteckt (0 = kein Fenster).
-' Zum Beenden: Task-Manager → "node" Prozess beenden.
+' Zum Beenden: stop-fotodatenbank.vbs ausführen (Desktop-Verknüpfung).
 
 Dim fso, scriptDir, projectDir, nodeCmd
 

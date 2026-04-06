@@ -510,6 +510,23 @@ export const fdFotogruppenverknRelations = relations(fdFotogruppenverkn, ({ one 
 }));
 
 // ============================================================
+// GÄSTEBUCH
+// ============================================================
+
+/**
+ * Gästebuch-Einträge
+ */
+export const guestbookEntries = mysqlTable("guestbook_entries", {
+  id: int("id").primaryKey().autoincrement(),
+  userId: int("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  message: text("message").notNull(),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  userIdx:    index("guestbook_user_idx").on(table.userId),
+  createdIdx: index("guestbook_created_idx").on(table.createdAt),
+}));
+
+// ============================================================
 // BAS – BRÜCKENDATENBANK (Legacy, Read für Dropdown)
 // ============================================================
 

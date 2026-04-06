@@ -3,7 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Save, Loader2, Trash2, User, Camera } from "lucide-react";
+import {
+  ArrowLeft, Save, Loader2, Trash2, User, Camera,
+  ShieldCheck, ChevronDown, ChevronUp,
+} from "lucide-react";
+import UserPermissionsEditor from "./UserPermissionsEditor";
+
+type Group = { id: number; name: string; slug: string; description: string | null };
 
 export default function EditBenutzerPage() {
   const router = useRouter();
@@ -16,39 +22,51 @@ export default function EditBenutzerPage() {
   const [error, setError] = useState("");
   const avatarInputRef = useRef<HTMLInputElement>(null);
 
+  // Alle verfügbaren Gruppen aus der DB
+  const [allGroups, setAllGroups] = useState<Group[]>([]);
+  // Aktuell ausgewählte Gruppen-Slugs dieses Benutzers
+  const [selectedGroupSlugs, setSelectedGroupSlugs] = useState<Set<string>>(new Set());
+
   const [form, setForm] = useState({
     name: "",
     email: "",
     newPassword: "",
     isActive: true,
     avatar: "",
-    groupAdmin: false,
-    groupUser: false,
-    groupFamilie: false,
   });
 
   const [isMainAdmin, setIsMainAdmin] = useState(false);
+  const [showPermissions, setShowPermissions] = useState(false);
 
   useEffect(() => {
     async function load() {
       try {
-        const res = await fetch(`/api/users/${userId}`);
-        const data = await res.json();
-        if (data.user) {
-          const groupSlugs = (data.groups ?? []).map(
+        // Parallel: Benutzer-Daten + alle Gruppen laden
+        const [userRes, groupsRes] = await Promise.all([
+          fetch(`/api/users/${userId}`),
+          fetch(`/api/groups`),
+        ]);
+
+        const userData = await userRes.json();
+        const groupsData = await groupsRes.json();
+
+        if (userData.user) {
+          const groupSlugs: string[] = (userData.groups ?? []).map(
             (g: { groupSlug: string }) => g.groupSlug
           );
           setForm({
-            name: data.user.name,
-            email: data.user.email,
+            name: userData.user.name,
+            email: userData.user.email,
             newPassword: "",
-            isActive: data.user.isActive,
-            avatar: data.user.avatar || "",
-            groupAdmin: groupSlugs.includes("admin"),
-            groupUser: groupSlugs.includes("user"),
-            groupFamilie: groupSlugs.includes("familie"),
+            isActive: userData.user.isActive,
+            avatar: userData.user.avatar || "",
           });
-          setIsMainAdmin(data.user.isMainAdmin);
+          setIsMainAdmin(userData.user.isMainAdmin);
+          setSelectedGroupSlugs(new Set(groupSlugs));
+        }
+
+        if (groupsData.groups) {
+          setAllGroups(groupsData.groups);
         }
       } catch {
         setError("Benutzer konnte nicht geladen werden");
@@ -58,6 +76,15 @@ export default function EditBenutzerPage() {
     }
     load();
   }, [userId]);
+
+  function toggleGroup(slug: string) {
+    setSelectedGroupSlugs((prev) => {
+      const next = new Set(prev);
+      if (next.has(slug)) next.delete(slug);
+      else next.add(slug);
+      return next;
+    });
+  }
 
   async function handleAvatarUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -95,16 +122,11 @@ export default function EditBenutzerPage() {
     setError("");
     setLoading(true);
 
-    const groupSlugs = [];
-    if (form.groupAdmin) groupSlugs.push("admin");
-    if (form.groupUser) groupSlugs.push("user");
-    if (form.groupFamilie) groupSlugs.push("familie");
-
     const payload: Record<string, unknown> = {
       name: form.name,
       isActive: form.isActive,
       avatar: form.avatar || null,
-      groupSlugs,
+      groupSlugs: Array.from(selectedGroupSlugs),
     };
     if (form.newPassword) payload.password = form.newPassword;
 
@@ -177,7 +199,7 @@ export default function EditBenutzerPage() {
 
       <form
         onSubmit={handleSubmit}
-        className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-5"
+        className="bg-gray-900 border border-gray-800 rounded-xl p-6 space-y-5 mb-6"
       >
         {error && (
           <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-4 py-3 text-sm">
@@ -236,6 +258,7 @@ export default function EditBenutzerPage() {
           />
         </div>
 
+        {/* Name */}
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-1.5">Name</label>
           <input
@@ -247,6 +270,7 @@ export default function EditBenutzerPage() {
           />
         </div>
 
+        {/* E-Mail (gesperrt) */}
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-1.5">E-Mail</label>
           <input
@@ -257,6 +281,7 @@ export default function EditBenutzerPage() {
           />
         </div>
 
+        {/* Passwort */}
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-1.5">
             Neues Passwort{" "}
@@ -272,30 +297,34 @@ export default function EditBenutzerPage() {
           />
         </div>
 
+        {/* Gruppen – dynamisch aus DB */}
         {!isMainAdmin && (
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-2">Gruppen</label>
-            <div className="space-y-2">
-              {[
-                { key: "groupAdmin", label: "Admin", desc: "Vollzugriff" },
-                { key: "groupUser", label: "Benutzer", desc: "Kommentare, Likes, Downloads" },
-                { key: "groupFamilie", label: "Familie", desc: "Kommentare, Upload" },
-              ].map((g) => (
-                <label key={g.key} className="flex items-center gap-2.5 cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={form[g.key as keyof typeof form] as boolean}
-                    onChange={(e) => setForm((p) => ({ ...p, [g.key]: e.target.checked }))}
-                    className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-amber-500"
-                  />
-                  <span className="text-gray-300 text-sm font-medium">{g.label}</span>
-                  <span className="text-gray-500 text-xs">– {g.desc}</span>
-                </label>
-              ))}
-            </div>
+            {allGroups.length === 0 ? (
+              <p className="text-xs text-gray-600">Keine Gruppen gefunden</p>
+            ) : (
+              <div className="space-y-2">
+                {allGroups.map((g) => (
+                  <label key={g.slug} className="flex items-center gap-2.5 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={selectedGroupSlugs.has(g.slug)}
+                      onChange={() => toggleGroup(g.slug)}
+                      className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-amber-500"
+                    />
+                    <span className="text-gray-300 text-sm font-medium">{g.name}</span>
+                    {g.description && (
+                      <span className="text-gray-500 text-xs">– {g.description}</span>
+                    )}
+                  </label>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
+        {/* Konto aktiv */}
         <div>
           <label className="flex items-center gap-2.5 cursor-pointer">
             <input
@@ -328,6 +357,45 @@ export default function EditBenutzerPage() {
           </Link>
         </div>
       </form>
+
+      {/* Individuelle Berechtigungen */}
+      {!isMainAdmin && (
+        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setShowPermissions((v) => !v)}
+            className="w-full flex items-center justify-between px-6 py-4 hover:bg-gray-800/40 transition-colors"
+          >
+            <div className="flex items-center gap-2.5">
+              <ShieldCheck className="w-4 h-4 text-amber-400" />
+              <span className="text-sm font-medium text-gray-300">
+                Individuelle Berechtigungen
+              </span>
+              <span className="text-xs text-gray-600">
+                – Überschreiben die Gruppenrechte
+              </span>
+            </div>
+            {showPermissions ? (
+              <ChevronUp className="w-4 h-4 text-gray-500" />
+            ) : (
+              <ChevronDown className="w-4 h-4 text-gray-500" />
+            )}
+          </button>
+
+          {showPermissions && (
+            <div className="px-6 pb-6 border-t border-gray-800">
+              <p className="text-xs text-gray-600 mt-4 mb-5">
+                Hier kannst du einzelne Rechte für diesen Benutzer gewähren (
+                <span className="text-green-400">+</span>) oder entziehen (
+                <span className="text-red-400">−</span>), unabhängig von seinen Gruppen.
+                Klicke auf <strong className="text-gray-500">G</strong>, um einen individuellen
+                Override zu entfernen und wieder das Gruppenrecht gelten zu lassen.
+              </p>
+              <UserPermissionsEditor userId={userId} />
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }

@@ -3,10 +3,11 @@ export const dynamic = 'force-dynamic';
 
 import Link from "next/link";
 import { db } from "@/lib/db";
-import { albums, albumVisibility, groups, photos } from "@/lib/db/schema";
+import { albums, albumVisibility, groups, photos, videos } from "@/lib/db/schema";
 import { eq, count, and, inArray } from "drizzle-orm";
-import { Camera, FolderOpen } from "lucide-react";
+import { Camera, Film, FolderOpen } from "lucide-react";
 import { auth } from "@/auth";
+import GuestbookPanel from "@/components/GuestbookPanel";
 
 /** Gibt alle Nachkommen-IDs eines Albums zurück (BFS) */
 function getDescendantIds(albumId: number, childMap: Map<number, number[]>): number[] {
@@ -20,31 +21,52 @@ function getDescendantIds(albumId: number, childMap: Map<number, number[]>): num
   return result;
 }
 
-async function getRootPublicAlbums() {
+async function getPublicStats() {
   try {
-    const publicGroup = await db
-      .select({ id: groups.id })
-      .from(groups)
-      .where(eq(groups.slug, "public"))
-      .limit(1);
+    const [photoCount] = await db.select({ count: count() }).from(photos).where(eq(photos.isPrivate, false));
+    const [videoCount] = await db.select({ count: count() }).from(videos).where(eq(videos.isPrivate, false));
+    const [albumCount] = await db.select({ count: count() }).from(albums).where(eq(albums.isActive, true));
+    return {
+      photos: photoCount.count,
+      videos: videoCount.count,
+      albums: albumCount.count,
+    };
+  } catch {
+    return { photos: 0, videos: 0, albums: 0 };
+  }
+}
 
-    if (publicGroup.length === 0) return [];
+async function getRootPublicAlbums(userGroupSlugs: string[] = ["public"], isAdmin = false) {
+  try {
+    let albumIds: number[];
 
-    const publicGroupId = publicGroup[0].id;
+    if (isAdmin) {
+      const allActive = await db
+        .select({ id: albums.id })
+        .from(albums)
+        .where(eq(albums.isActive, true));
+      albumIds = allActive.map((a) => a.id);
+    } else {
+      const userGroups = await db
+        .select({ id: groups.id })
+        .from(groups)
+        .where(inArray(groups.slug, userGroupSlugs));
 
-    // Alle für "public" sichtbaren Album-IDs
-    const visibleEntries = await db
-      .selectDistinct({ albumId: albumVisibility.albumId })
-      .from(albumVisibility)
-      .where(eq(albumVisibility.groupId, publicGroupId));
+      const groupIds = userGroups.map((g) => g.id);
+      if (groupIds.length === 0) return [];
 
-    const albumIds = visibleEntries
-      .map((v) => v.albumId)
-      .filter((id): id is number => id !== null);
+      const visibleEntries = await db
+        .selectDistinct({ albumId: albumVisibility.albumId })
+        .from(albumVisibility)
+        .where(inArray(albumVisibility.groupId, groupIds));
+
+      albumIds = visibleEntries
+        .map((v) => v.albumId)
+        .filter((id): id is number => id !== null);
+    }
 
     if (albumIds.length === 0) return [];
 
-    // Alle sichtbaren Alben laden (brauchen wir um Root-Alben zu ermitteln)
     const allAlbums = await db
       .select({
         id: albums.id,
@@ -64,12 +86,10 @@ async function getRootPublicAlbums() {
 
     const accessibleIds = new Set(allAlbums.map((a) => a.id));
 
-    // Nur Root-Alben (kein Parent oder Parent nicht in sichtbaren Alben)
     const rootAlbums = allAlbums.filter(
       (a) => !a.parentId || !accessibleIds.has(a.parentId)
     );
 
-    // Foto-Counts
     const photoStats = await db
       .select({ albumId: photos.albumId, cnt: count() })
       .from(photos)
@@ -78,9 +98,7 @@ async function getRootPublicAlbums() {
 
     const photoMap = new Map(photoStats.map((p) => [p.albumId, p.cnt]));
 
-    // Unteralbum-Anzahl pro Album
     const childCountMap = new Map<number, number>();
-    // Album-Child-Map (für Unteralben-Lookup)
     const albumChildMap = new Map<number, number[]>();
     for (const a of allAlbums) {
       if (a.parentId && accessibleIds.has(a.parentId)) {
@@ -90,8 +108,6 @@ async function getRootPublicAlbums() {
       }
     }
 
-    // Cover-Fotos (Priorität 1: explizit gesetztes Cover)
-    const rootAlbumIds = rootAlbums.map((a) => a.id);
     const coverPhotoIds = rootAlbums
       .map((a) => a.coverPhotoId)
       .filter((id): id is number => id !== null);
@@ -106,7 +122,6 @@ async function getRootPublicAlbums() {
 
     const coverMap = new Map(coverPhotos.map((p) => [p.id, p]));
 
-    // ── Fallback-Cover: Priorität 2 & 3 ────────────────────────────
     const rootsWithoutCover = rootAlbums
       .filter((a) => !a.coverPhotoId)
       .map((a) => a.id);
@@ -114,7 +129,6 @@ async function getRootPublicAlbums() {
     const fallbackCoverMap = new Map<number, { thumbnailUrl: string | null; fileUrl: string }>();
 
     if (rootsWithoutCover.length > 0) {
-      // Priorität 2: Zufälliges Foto direkt aus dem Album
       const directPhotos = await db
         .select({
           albumId: photos.albumId,
@@ -140,7 +154,6 @@ async function getRootPublicAlbums() {
         }
       }
 
-      // Priorität 3: Zufälliges Foto aus Unteralben
       const needsSubFallback = rootsWithoutCover.filter((id) => !fallbackCoverMap.has(id));
 
       if (needsSubFallback.length > 0) {
@@ -215,14 +228,31 @@ async function getRootPublicAlbums() {
 }
 
 export default async function HomePage() {
-  // auth() in try/catch absichern – verhindert 404 bei Auth-Konfigurationsfehler
   let session = null;
   try {
     session = await auth();
   } catch (e) {
     console.error("Auth-Fehler auf Startseite:", e);
   }
-  const rootAlbums = await getRootPublicAlbums();
+
+  const isMainAdmin = !!(session?.user as { isMainAdmin?: boolean })?.isMainAdmin;
+  const userGroupSlugs: string[] = [
+    "public",
+    ...((session?.user as { groups?: string[] })?.groups ?? []),
+  ];
+
+  const [rootAlbums, stats] = await Promise.all([
+    getRootPublicAlbums(userGroupSlugs, isMainAdmin),
+    getPublicStats(),
+  ]);
+
+  const currentUserName = session?.user?.name ?? null;
+
+  const statCards = [
+    { label: "Fotos",  value: stats.photos, icon: Camera,     color: "text-amber-400", bg: "bg-amber-500/10" },
+    { label: "Videos", value: stats.videos, icon: Film,        color: "text-blue-400",  bg: "bg-blue-500/10"  },
+    { label: "Alben",  value: stats.albums, icon: FolderOpen,  color: "text-green-400", bg: "bg-green-500/10" },
+  ];
 
   return (
     <div className="min-h-screen bg-gray-950 text-white">
@@ -233,7 +263,7 @@ export default async function HomePage() {
             <Camera className="w-10 h-10 text-amber-400" />
           </div>
           <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">FranksFotos</h1>
-          <p className="text-xl text-gray-400">Meine persönliche Fotogalerie</p>
+          <p className="text-xl text-gray-400">Unsere Reisen mit der Kamera – durch meine Linse – Erinnerungen an Orte und Erlebnisse</p>
         </div>
       </section>
 
@@ -287,7 +317,6 @@ export default async function HomePage() {
                       </div>
                     )}
 
-                    {/* Foto-Anzahl Badge */}
                     {album.photoCount > 0 && (
                       <div className="absolute bottom-1.5 right-1.5 bg-black/70 rounded-full px-2 py-0.5 flex items-center gap-1">
                         <Camera className="w-3 h-3 text-amber-400" />
@@ -295,7 +324,6 @@ export default async function HomePage() {
                       </div>
                     )}
 
-                    {/* Unteralbum-Badge */}
                     {album.childCount > 0 && (
                       <div className="absolute top-1.5 left-1.5 bg-black/70 rounded-full px-2 py-0.5 flex items-center gap-1">
                         <FolderOpen className="w-3 h-3 text-amber-400" />
@@ -326,6 +354,36 @@ export default async function HomePage() {
           </>
         )}
       </section>
+
+      {/* ── Statistik-Panel ─────────────────────────────────────────── */}
+      <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12">
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+          {statCards.map((card) => {
+            const Icon = card.icon;
+            return (
+              <div
+                key={card.label}
+                className="bg-gray-900 border border-gray-800 rounded-xl p-5"
+              >
+                <div className="flex items-center gap-3 mb-3">
+                  <div className={`${card.bg} rounded-lg p-2`}>
+                    <Icon className={`w-5 h-5 ${card.color}`} />
+                  </div>
+                  <span className="text-gray-400 text-sm">{card.label}</span>
+                </div>
+                <div className={`text-3xl font-bold ${card.color}`}>
+                  {card.value.toLocaleString("de-DE")}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      {/* ── Gästebuch (nur für eingeloggte User sichtbar) ───────────── */}
+      {currentUserName && (
+        <GuestbookPanel currentUserName={currentUserName} />
+      )}
     </div>
   );
 }

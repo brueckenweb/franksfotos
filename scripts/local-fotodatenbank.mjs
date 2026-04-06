@@ -26,6 +26,7 @@ const DEFAULT_CONFIG = {
   port:             4567,
   zuverarbeitenPath: "C:\\Users\\Frank\\zuverarbeiten",
   fotodatenbankPath: "C:\\FS_Fotodatenbank",
+  fotosBasePath:    "F:\\",
 };
 
 let cfg = { ...DEFAULT_CONFIG };
@@ -214,6 +215,7 @@ async function handleScan(_req, res) {
     try {
       const { default: sharp } = await import("sharp");
       const thumbBuf = await sharp(fileMap.get(jpgKey))
+        .rotate()                                       // EXIF-Orientation in Pixel einbrennen
         .resize(900, null, { withoutEnlargement: true })
         .jpeg({ quality: 80 })
         .toBuffer();
@@ -243,7 +245,7 @@ async function handleProcess(req, res) {
     return sendJson(res, 400, { error: "Ungültiger JSON-Body" });
   }
 
-  const { bnummer, pfad, baseName, generateBas = false, generateGalerie = false } = params;
+  const { bnummer, pfad, baseName, generateBas = false, generateGalerie = false, crop = null } = params;
   if (!bnummer || !baseName) {
     return sendJson(res, 400, { error: "bnummer und baseName sind erforderlich" });
   }
@@ -326,22 +328,50 @@ async function handleProcess(req, res) {
     try {
       const { default: sharp } = await import("sharp");
 
+      /**
+       * Sharp-Pipeline mit optionalem Crop.
+       * crop = { x, y, w, h } – normalisierte Koordinaten (0–1), relativ zur
+       * Bildgröße nach EXIF-Rotation (d. h. aufrechtes Bild).
+       */
+      async function makePipeline(targetWidth, quality) {
+        let pipe = sharp(destJpgPath).rotate(); // EXIF-Orientation einbrennen
+
+        if (crop && typeof crop.x === "number") {
+          // Upright-Dimensionen nach .rotate() berechnen
+          const meta        = await sharp(destJpgPath).metadata();
+          const orientation = meta.orientation ?? 1;
+          // Orientierungen 5–8: Breite/Höhe sind vertauscht (90° / 270°-Rotation)
+          const swapped = orientation >= 5 && orientation <= 8;
+          const upW = swapped ? (meta.height ?? 0) : (meta.width  ?? 0);
+          const upH = swapped ? (meta.width  ?? 0) : (meta.height ?? 0);
+
+          if (upW > 0 && upH > 0) {
+            const left   = Math.max(0, Math.round(crop.x * upW));
+            const top    = Math.max(0, Math.round(crop.y * upH));
+            const width  = Math.min(upW - left, Math.max(1, Math.round(crop.w * upW)));
+            const height = Math.min(upH - top,  Math.max(1, Math.round(crop.h * upH)));
+
+            if (width > 0 && height > 0) {
+              console.log(`  Crop: ${left},${top} + ${width}×${height} px (aus ${upW}×${upH})`);
+              pipe = pipe.extract({ left, top, width, height });
+            }
+          }
+        }
+
+        return pipe.resize(targetWidth, null, { withoutEnlargement: true })
+                   .jpeg({ quality });
+      }
+
       if (generateBas) {
-        const buf = await sharp(destJpgPath)
-          .resize(800, null, { withoutEnlargement: true })
-          .jpeg({ quality: 85 })
-          .toBuffer();
+        const buf = await (await makePipeline(800, 85)).toBuffer();
         basJpgBase64 = buf.toString("base64");
-        console.log(`  BAS-JPG: ${(buf.length / 1024).toFixed(0)} KB`);
+        console.log(`  BAS-JPG: ${(buf.length / 1024).toFixed(0)} KB${crop ? " (mit Crop)" : ""}`);
       }
 
       if (generateGalerie) {
-        const buf = await sharp(destJpgPath)
-          .resize(2000, null, { withoutEnlargement: true })
-          .jpeg({ quality: 90 })
-          .toBuffer();
+        const buf = await (await makePipeline(2000, 90)).toBuffer();
         galerieJpgBase64 = buf.toString("base64");
-        console.log(`  Galerie-JPG: ${(buf.length / 1024).toFixed(0)} KB`);
+        console.log(`  Galerie-JPG: ${(buf.length / 1024).toFixed(0)} KB${crop ? " (mit Crop)" : ""}`);
       }
     } catch (e) {
       errors.push(`Sharp-Fehler: ${e.message}`);
@@ -421,6 +451,161 @@ async function handleDelete(req, res) {
   sendJson(res, 200, { moved, errors, geloeschtOrdner });
 }
 
+// ── Neue Handler für Fotodatenbank-Browser ───────────────────────────────────
+
+/**
+ * GET /thumbnail?bnummer=12345&pfad=1bilder
+ * Liefert ein 250px-Thumbnail des Fotos von F:\{pfad}\B{bnummer}.jpg
+ */
+async function handleThumbnail(req, res) {
+  const url      = new URL(req.url, `http://localhost:${cfg.port}`);
+  const bnummer  = url.searchParams.get("bnummer");
+  const pfad     = url.searchParams.get("pfad") || "";
+
+  if (!bnummer) {
+    res.writeHead(400, { "Content-Type": "text/plain" });
+    return res.end("bnummer fehlt");
+  }
+
+  // Pfad: F:\{pfad}\B{bnummer}.jpg
+  const basePath = cfg.fotosBasePath || "F:\\";
+  const jpgPath  = pfad
+    ? path.join(basePath, pfad, `B${bnummer}.jpg`)
+    : path.join(basePath, `B${bnummer}.jpg`);
+
+  if (!fs.existsSync(jpgPath)) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    return res.end(`Datei nicht gefunden: ${jpgPath}`);
+  }
+
+  try {
+    const { default: sharp } = await import("sharp");
+    const buf = await sharp(jpgPath)
+      .rotate()
+      .resize(250, null, { withoutEnlargement: true })
+      .jpeg({ quality: 75 })
+      .toBuffer();
+
+    res.writeHead(200, {
+      "Content-Type":  "image/jpeg",
+      "Content-Length": buf.length,
+      "Cache-Control":  "public, max-age=3600",
+    });
+    res.end(buf);
+  } catch (e) {
+    res.writeHead(500, { "Content-Type": "text/plain" });
+    res.end(`Thumbnail-Fehler: ${e.message}`);
+  }
+}
+
+/**
+ * GET /files?bnummer=12345&pfad=1bilder
+ * Listet alle Dateien B{bnummer}.* im Ordner F:\{pfad}\
+ */
+async function handleFiles(req, res) {
+  const url     = new URL(req.url, `http://localhost:${cfg.port}`);
+  const bnummer = url.searchParams.get("bnummer");
+  const pfad    = url.searchParams.get("pfad") || "";
+
+  if (!bnummer) {
+    return sendJson(res, 400, { error: "bnummer fehlt" });
+  }
+
+  const basePath = cfg.fotosBasePath || "F:\\";
+  const ordner   = pfad
+    ? path.join(basePath, pfad)
+    : basePath;
+
+  if (!fs.existsSync(ordner)) {
+    return sendJson(res, 404, { error: `Ordner nicht gefunden: ${ordner}` });
+  }
+
+  try {
+    const allFiles    = fs.readdirSync(ordner);
+    const prefix      = `B${bnummer}.`.toLowerCase();
+    const matched     = allFiles.filter((n) => n.toLowerCase().startsWith(prefix));
+    const fileDetails = matched.map((name) => {
+      const fullPath = path.join(ordner, name);
+      let sizeBytes = 0;
+      try {
+        sizeBytes = fs.statSync(fullPath).size;
+      } catch { /* ignore */ }
+      const extIdx = name.lastIndexOf(".");
+      const ext    = extIdx >= 0 ? name.slice(extIdx + 1).toLowerCase() : "";
+      return {
+        name,
+        ext,
+        sizeBytes,
+        sizeHuman: sizeBytes > 1024 * 1024
+          ? `${(sizeBytes / 1024 / 1024).toFixed(1)} MB`
+          : `${(sizeBytes / 1024).toFixed(0)} KB`,
+        isJpg: ["jpg", "jpeg"].includes(ext),
+      };
+    });
+
+    const totalBytes  = fileDetails.reduce((s, f) => s + f.sizeBytes, 0);
+    const totalHuman  = totalBytes > 1024 * 1024
+      ? `${(totalBytes / 1024 / 1024).toFixed(1)} MB`
+      : `${(totalBytes / 1024).toFixed(0)} KB`;
+
+    sendJson(res, 200, {
+      bnummer,
+      pfad,
+      ordner,
+      files: fileDetails,
+      totalHuman,
+      anzahl: fileDetails.length,
+    });
+  } catch (e) {
+    sendJson(res, 500, { error: `Fehler beim Lesen: ${e.message}` });
+  }
+}
+
+/**
+ * POST /prepare-galerie  { bnummer, pfad }
+ * Liest vorhandenes B{bnummer}.jpg von F:\{pfad}\, skaliert auf 2000px
+ * und gibt galerieJpgBase64 zurück.
+ */
+async function handlePrepareGalerie(req, res) {
+  let params;
+  try {
+    params = JSON.parse(await readBody(req));
+  } catch {
+    return sendJson(res, 400, { error: "Ungültiger JSON-Body" });
+  }
+
+  const { bnummer, pfad = "" } = params;
+  if (!bnummer) {
+    return sendJson(res, 400, { error: "bnummer ist erforderlich" });
+  }
+
+  const basePath = cfg.fotosBasePath || "F:\\";
+  const jpgPath  = pfad
+    ? path.join(basePath, pfad, `B${bnummer}.jpg`)
+    : path.join(basePath, `B${bnummer}.jpg`);
+
+  if (!fs.existsSync(jpgPath)) {
+    return sendJson(res, 404, { error: `Datei nicht gefunden: ${jpgPath}` });
+  }
+
+  try {
+    const { default: sharp } = await import("sharp");
+    const buf = await sharp(jpgPath)
+      .rotate()
+      .resize(2000, null, { withoutEnlargement: true })
+      .jpeg({ quality: 90 })
+      .toBuffer();
+
+    console.log(`  prepare-galerie B${bnummer}: ${(buf.length / 1024 / 1024).toFixed(1)} MB`);
+    sendJson(res, 200, {
+      galerieJpgBase64: buf.toString("base64"),
+      sizeKb:           Math.round(buf.length / 1024),
+    });
+  } catch (e) {
+    sendJson(res, 500, { error: `Sharp-Fehler: ${e.message}` });
+  }
+}
+
 // ── HTTP-Server ──────────────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
@@ -436,10 +621,13 @@ const server = http.createServer(async (req, res) => {
   const route = url.pathname;
 
   try {
-    if (route === "/status")                              return await handleStatus(req, res);
-    if (route === "/scan"    && req.method === "GET")    return await handleScan(req, res);
-    if (route === "/process" && req.method === "POST")   return await handleProcess(req, res);
-    if (route === "/delete"  && req.method === "POST")   return await handleDelete(req, res);
+    if (route === "/status")                                    return await handleStatus(req, res);
+    if (route === "/scan"             && req.method === "GET")  return await handleScan(req, res);
+    if (route === "/process"          && req.method === "POST") return await handleProcess(req, res);
+    if (route === "/delete"           && req.method === "POST") return await handleDelete(req, res);
+    if (route === "/thumbnail"        && req.method === "GET")  return await handleThumbnail(req, res);
+    if (route === "/files"            && req.method === "GET")  return await handleFiles(req, res);
+    if (route === "/prepare-galerie"  && req.method === "POST") return await handlePrepareGalerie(req, res);
 
     sendJson(res, 404, { error: `Route nicht gefunden: ${route}` });
   } catch (err) {

@@ -17,6 +17,9 @@ export default function NeuesAlbumPage() {
   const [availableTags, setAvailableTags] = useState<TagOption[]>([]);
   const [tagsLoading, setTagsLoading] = useState(false);
 
+  const [groups, setGroups] = useState<{ id: number; name: string; slug: string; description: string | null }[]>([]);
+  const [groupsLoading, setGroupsLoading] = useState(true);
+
   const [form, setForm] = useState({
     name: "",
     slug: "",
@@ -25,9 +28,7 @@ export default function NeuesAlbumPage() {
     sortOrder: "0",
     childSortMode: "order",
     photoSortMode: "created_asc",
-    visibleForPublic: true,
-    visibleForUser: false,
-    visibleForFamilie: false,
+    visibleForGroups: ["public"] as string[],
     sourceType: "own" as "own" | "tag",
     tagId: "",
   });
@@ -38,6 +39,16 @@ export default function NeuesAlbumPage() {
       .then((r) => r.json())
       .then((data) => setAlbums(data.albums ?? []))
       .catch(() => {});
+  }, []);
+
+  // Usergruppen laden
+  useEffect(() => {
+    setGroupsLoading(true);
+    fetch("/api/groups")
+      .then((r) => r.json())
+      .then((data) => setGroups(data.groups ?? []))
+      .catch(() => {})
+      .finally(() => setGroupsLoading(false));
   }, []);
 
   // Tags laden
@@ -71,11 +82,6 @@ export default function NeuesAlbumPage() {
     setError("");
     setLoading(true);
 
-    const visibleForGroups = [];
-    if (form.visibleForPublic) visibleForGroups.push("public");
-    if (form.visibleForUser) visibleForGroups.push("user");
-    if (form.visibleForFamilie) visibleForGroups.push("familie");
-
     try {
       const res = await fetch("/api/albums", {
         method: "POST",
@@ -88,7 +94,7 @@ export default function NeuesAlbumPage() {
           sortOrder: parseInt(form.sortOrder) || 0,
           childSortMode: form.childSortMode,
           photoSortMode: form.photoSortMode,
-          visibleForGroups,
+          visibleForGroups: form.visibleForGroups,
           sourceType: form.sourceType,
           tagId: form.sourceType === "tag" && form.tagId ? parseInt(form.tagId) : null,
         }),
@@ -345,24 +351,37 @@ export default function NeuesAlbumPage() {
         {/* Sichtbarkeit */}
         <div>
           <label className="block text-sm font-medium text-gray-300 mb-2">Sichtbar für</label>
-          <div className="space-y-2">
-            {[
-              { key: "visibleForPublic", label: "Öffentlich (kein Login)", slug: "public" },
-              { key: "visibleForUser", label: "Benutzer (eingeloggt)", slug: "user" },
-              { key: "visibleForFamilie", label: "Familie", slug: "familie" },
-            ].map((group) => (
-              <label key={group.key} className="flex items-center gap-2.5 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={form[group.key as keyof typeof form] as boolean}
-                  onChange={(e) => setForm((p) => ({ ...p, [group.key]: e.target.checked }))}
-                  className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-amber-500 focus:ring-amber-500 focus:ring-offset-gray-900"
-                />
-                <span className="text-gray-300 text-sm">{group.label}</span>
-                <span className="text-gray-600 text-xs font-mono">{group.slug}</span>
-              </label>
-            ))}
-          </div>
+          {groupsLoading ? (
+            <div className="flex items-center gap-2 text-gray-500 text-sm py-2">
+              <Loader2 className="w-4 h-4 animate-spin" />
+              Gruppen werden geladen…
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {groups.map((group) => (
+                <label key={group.slug} className="flex items-center gap-2.5 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={form.visibleForGroups.includes(group.slug)}
+                    onChange={(e) =>
+                      setForm((p) => ({
+                        ...p,
+                        visibleForGroups: e.target.checked
+                          ? [...p.visibleForGroups, group.slug]
+                          : p.visibleForGroups.filter((s) => s !== group.slug),
+                      }))
+                    }
+                    className="w-4 h-4 rounded border-gray-600 bg-gray-800 text-amber-500 focus:ring-amber-500 focus:ring-offset-gray-900"
+                  />
+                  <span className="text-gray-300 text-sm">{group.name}</span>
+                  <span className="text-gray-600 text-xs font-mono">{group.slug}</span>
+                </label>
+              ))}
+              {groups.length === 0 && (
+                <p className="text-gray-500 text-sm">Keine Gruppen vorhanden.</p>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Buttons */}

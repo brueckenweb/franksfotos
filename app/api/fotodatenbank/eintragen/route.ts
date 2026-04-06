@@ -261,6 +261,61 @@ export async function POST(request: NextRequest) {
               : `${target.thumbnailPath}${thumbName}`)
           : null;
 
+        // ── EXIF-Daten aus den Fotodatenbank-Feldern zusammenstellen ──────────
+        // Die ExifBox-Komponente erwartet Standard-EXIF-Feldnamen.
+        const exifForGalerie: Record<string, unknown> = {};
+
+        // Aufnahmedatum + Uhrzeit → ISO-String (ExifBox: DateTimeOriginal)
+        if (aufnahmedatum) {
+          exifForGalerie.DateTimeOriginal = aufnahmezeit
+            ? `${aufnahmedatum}T${aufnahmezeit}`
+            : aufnahmedatum;
+        }
+
+        // Kamera (ExifBox: [Make, Model].join(" ") – wir legen alles in Model)
+        if (kamera) {
+          exifForGalerie.Model = kamera;
+        }
+
+        // Blende: "f/2.8" → 2.8  (ExifBox zeigt "f/{FNumber}")
+        if (blende) {
+          const m = blende.match(/^f\/?([\d.]+)$/i);
+          exifForGalerie.FNumber = m ? parseFloat(m[1]) : blende;
+        }
+
+        // Belichtungszeit: "1/500" – ExifBox zeigt "{ExposureTime} s"
+        if (belichtung) {
+          exifForGalerie.ExposureTime = belichtung;
+        }
+
+        // ISO
+        if (iso) {
+          const isoNum = parseInt(iso, 10);
+          exifForGalerie.ISO = isNaN(isoNum) ? iso : isoNum;
+        }
+
+        // Brennweite (als zusätzliche Info)
+        if (brennweite) {
+          exifForGalerie.FocalLength = brennweite;
+        }
+
+        // GPS (Dezimalgrad → ExifBox nutzt latitude/longitude direkt)
+        if (gpsbreite !== 0 || gpslaenge !== 0) {
+          exifForGalerie.latitude  = gpsbreite;
+          exifForGalerie.longitude = gpslaenge;
+          if (gpshoehe !== 0) {
+            exifForGalerie.GPSAltitude = gpshoehe;
+          }
+        }
+
+        // Fotograf als Copyright
+        if (fotograf) {
+          exifForGalerie.Copyright = fotograf;
+        }
+
+        const exifDataForDb =
+          Object.keys(exifForGalerie).length > 0 ? exifForGalerie : null;
+
         const userId = Number((session!.user as { id: string }).id);
         const [inserted] = await db.insert(photos).values({
           albumId:      galerieAlbumId,
@@ -269,6 +324,7 @@ export async function POST(request: NextRequest) {
           description:  galerieBeschreibung,
           fileUrl,
           thumbnailUrl: thumbnailUrl ?? null,
+          exifData:     exifDataForDb,
           isPrivate:    galeriePrivat,
           sortOrder:    0,
           bnummer:      `B${bnummer}`,

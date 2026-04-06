@@ -73,10 +73,12 @@ export default function ExifMap({ lat, lon }: ExifMapProps) {
   }, []);
 
   return (
-    <div
-      ref={mapRef}
-      className="w-full rounded-lg overflow-hidden border border-gray-700"
-      style={{ height: "180px" }}
-    />
+    <div style={{ position: "relative", zIndex: 0, isolation: "isolate" }}>
+      <div
+        ref={mapRef}
+        className="w-full rounded-lg overflow-hidden border border-gray-700"
+        style={{ height: "180px" }}
+      />
+    </div>
   );
 }

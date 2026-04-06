@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Plus, X, Sparkles } from "lucide-react";
+import { Plus, X, Sparkles, ChevronDown, ChevronRight } from "lucide-react";
 import CreateTagModal, { type CreatedTag } from "./CreateTagModal";
 
 interface Tag {
@@ -34,6 +34,46 @@ export default function TagInput({
   const [showInput, setShowInput] = useState(false);
   const [inputValue, setInputValue] = useState("");
   const [showModal, setShowModal] = useState(false);
+  // Welche Gruppen sind aufgeklappt? (Set der Gruppen-Schlüssel)
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
+  // Aufgeklappte Gruppen im Hinzufügen-Dropdown
+  const [expandedAddGroups, setExpandedAddGroups] = useState<Set<string>>(new Set());
+
+  function toggleGroup(key: string) {
+    setExpandedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function toggleAddGroup(key: string) {
+    setExpandedAddGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  /** Tags nach Gruppe gruppieren */
+  function groupTags(tagList: Tag[]): { key: string; color?: string; tags: Tag[] }[] {
+    const map = new Map<string, { color?: string; tags: Tag[] }>();
+    for (const tag of tagList) {
+      const key = tag.groupName ?? "—";
+      if (!map.has(key)) map.set(key, { color: tag.groupColor, tags: [] });
+      map.get(key)!.tags.push(tag);
+    }
+    // Sortiert: benannte Gruppen alphabetisch, ungrouped zuletzt
+    return Array.from(map.entries())
+      .sort(([a], [b]) => {
+        if (a === "—") return 1;
+        if (b === "—") return -1;
+        return a.localeCompare(b, "de");
+      })
+      .map(([key, val]) => ({ key, ...val }));
+  }
 
   // Lade verfügbare Tags wenn das Suchfeld geöffnet wird
   useEffect(() => {
@@ -172,30 +212,44 @@ export default function TagInput({
               className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-500 focus:border-transparent"
             />
 
-            {/* Trefferliste */}
+            {/* Trefferliste – hierarchisch, aufklappbar nach Gruppe */}
             {filteredTags.length > 0 && (
-              <div className="mt-1 max-h-36 overflow-y-auto bg-gray-800 border border-gray-700 rounded-lg">
-                {filteredTags.map((tag) => (
-                  <button
-                    key={tag.id}
-                    onClick={() => addTag(tag.id)}
-                    disabled={isLoading}
-                    className="w-full text-left px-3 py-2 text-sm text-gray-300 hover:bg-gray-700 hover:text-white flex items-center justify-between disabled:opacity-50"
-                  >
-                    <span>
-                      {tag.groupName && (
-                        <span
-                          style={{ color: tag.groupColor }}
-                          className="mr-1.5 text-xs"
-                        >
-                          {tag.groupName}:
+              <div className="mt-1 max-h-64 overflow-y-auto bg-gray-800 border border-gray-700 rounded-lg divide-y divide-gray-700/50">
+                {groupTags(filteredTags).map(({ key, color, tags: groupTagList }) => {
+                  const isAddExpanded = expandedAddGroups.has(key);
+                  return (
+                    <div key={key}>
+                      {/* Gruppen-Header – klickbar, zugeklappt by default */}
+                      <button
+                        type="button"
+                        onClick={() => toggleAddGroup(key)}
+                        className="w-full flex items-center gap-1.5 px-3 py-2 text-xs font-semibold hover:bg-gray-700/60 transition-colors"
+                        style={{ color: color ?? "#9ca3af" }}
+                      >
+                        {isAddExpanded
+                          ? <ChevronDown className="w-3 h-3 flex-shrink-0" />
+                          : <ChevronRight className="w-3 h-3 flex-shrink-0" />}
+                        {key}
+                        <span className="text-gray-600 font-normal ml-auto">
+                          ({groupTagList.length})
                         </span>
-                      )}
-                      {tag.name}
-                    </span>
-                    <Plus className="w-3 h-3 flex-shrink-0" />
-                  </button>
-                ))}
+                      </button>
+
+                      {/* Tags der Gruppe – nur wenn aufgeklappt */}
+                      {isAddExpanded && groupTagList.map((tag) => (
+                        <button
+                          key={tag.id}
+                          onClick={() => addTag(tag.id)}
+                          disabled={isLoading}
+                          className="w-full text-left pl-7 pr-3 py-1.5 text-sm text-gray-300 hover:bg-gray-700 hover:text-white flex items-center justify-between disabled:opacity-50"
+                        >
+                          <span>{tag.name}</span>
+                          <Plus className="w-3 h-3 flex-shrink-0 text-gray-500" />
+                        </button>
+                      ))}
+                    </div>
+                  );
+                })}
               </div>
             )}
 
@@ -213,44 +267,71 @@ export default function TagInput({
           </div>
         )}
 
-        {/* Tag-Badges */}
+        {/* Tag-Gruppen (hierarchisch, aufklappbar) */}
         {tags.length > 0 ? (
-          <div className="flex flex-wrap gap-2">
-            {tags.map((tag) => (
-              <span
-                key={tag.id}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs font-medium"
-                style={{
-                  backgroundColor: tag.groupColor || "#6b7280",
-                  color: "white",
-                }}
-              >
-                {tag.groupName && (
-                  <span className="opacity-75">{tag.groupName}:</span>
-                )}
-                {tag.name}
-                {isAdmin && (
+          <div className="space-y-1">
+            {groupTags(tags).map(({ key, color, tags: groupTagList }) => {
+              const isExpanded = expandedGroups.has(key);
+              return (
+                <div key={key} className="rounded-lg overflow-hidden border border-gray-800">
+                  {/* Gruppen-Header: immer sichtbar, klickbar */}
                   <button
-                    onClick={() => removeTag(tag.id)}
-                    disabled={isLoading}
-                    className="ml-0.5 opacity-75 hover:opacity-100 disabled:opacity-50 transition-opacity"
-                    title={`Tag "${tag.name}" entfernen`}
+                    type="button"
+                    onClick={() => toggleGroup(key)}
+                    className="w-full flex items-center justify-between px-3 py-2 text-xs font-semibold hover:bg-gray-800/60 transition-colors"
+                    style={{ color: color ?? "#9ca3af" }}
                   >
-                    <X className="w-3 h-3" />
+                    <span className="flex items-center gap-1.5">
+                      {isExpanded
+                        ? <ChevronDown className="w-3.5 h-3.5" />
+                        : <ChevronRight className="w-3.5 h-3.5" />}
+                      {key}
+                      <span className="text-gray-600 font-normal">
+                        ({groupTagList.length})
+                      </span>
+                    </span>
                   </button>
-                )}
-              </span>
-            ))}
 
-            {/* Kompakter Modal-Button neben den Badges (eingeloggt + kein Suchfeld offen) */}
+                  {/* Tags innerhalb der Gruppe */}
+                  {isExpanded && (
+                    <div className="px-3 pb-2 pt-1 flex flex-wrap gap-1.5 bg-gray-900/40">
+                      {groupTagList.map((tag) => (
+                        <span
+                          key={tag.id}
+                          className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium"
+                          style={{
+                            backgroundColor: tag.groupColor || "#6b7280",
+                            color: "white",
+                          }}
+                        >
+                          {tag.name}
+                          {isAdmin && (
+                            <button
+                              onClick={() => removeTag(tag.id)}
+                              disabled={isLoading}
+                              className="ml-0.5 opacity-75 hover:opacity-100 disabled:opacity-50 transition-opacity"
+                              title={`Tag "${tag.name}" entfernen`}
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Kompakter „Neu"-Button (eingeloggt + kein Suchfeld offen) */}
             {isLoggedIn && !showInput && (
               <button
                 onClick={() => setShowModal(true)}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded-full text-xs text-gray-500 hover:text-amber-400 border border-dashed border-gray-700 hover:border-amber-600 transition-colors"
+                className="mt-1 w-full flex items-center justify-center gap-1.5 text-xs text-gray-500 hover:text-amber-400 border border-dashed border-gray-700 hover:border-amber-600 rounded-lg px-3 py-1.5 transition-colors"
                 title="Neuen Tag erstellen"
               >
                 <Sparkles className="w-3 h-3" />
-                Neu
+                Neuen Tag erstellen
               </button>
             )}
           </div>
