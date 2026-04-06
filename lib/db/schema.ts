@@ -367,6 +367,35 @@ export const fdFotogruppenverkn = mysqlTable("fd_fotogruppenverkn", {
 }));
 
 // ============================================================
+// GPX-TRACKS (fd_gpx)
+// ============================================================
+
+/**
+ * GPX-Tracks – Touren-Daten mit Kartenanzeige
+ */
+export const fdGpx = mysqlTable("fd_gpx", {
+  id:           int("id").primaryKey().autoincrement(),
+  titel:        varchar("titel", { length: 255 }).notNull(),
+  beschreibung: text("beschreibung"),
+  typ:          varchar("typ", { length: 20 }).notNull().default("Wanderung"),
+  land:         varchar("land", { length: 100 }),
+  laengeKm:     varchar("laenge_km", { length: 20 }),   // DECIMAL als String für Flexibilität
+  hoehmAuf:     int("hoehenm_auf"),
+  datumTour:    date("datum_tour"),
+  albumId:      int("album_id").references(() => albums.id, { onDelete: "set null" }),
+  gpxDateiname: varchar("gpx_dateiname", { length: 255 }).notNull().default(""),
+  gpxUrl:       varchar("gpx_url", { length: 500 }).notNull(),
+  eingetragen:  timestamp("eingetragen").defaultNow().notNull(),
+  userId:       int("user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
+}, (table) => ({
+  albumIdx:  index("fd_gpx_album_idx").on(table.albumId),
+  userIdx:   index("fd_gpx_user_idx").on(table.userId),
+  typIdx:    index("fd_gpx_typ_idx").on(table.typ),
+  landIdx:   index("fd_gpx_land_idx").on(table.land),
+  datumIdx:  index("fd_gpx_datum_idx").on(table.datumTour),
+}));
+
+// ============================================================
 // ZUGRIFFSSTATISTIK
 // ============================================================
 
@@ -510,6 +539,85 @@ export const fdFotogruppenverknRelations = relations(fdFotogruppenverkn, ({ one 
 }));
 
 // ============================================================
+// WELTREISE-KARTE (travel_*)
+// ============================================================
+
+/**
+ * Reisekarten – jeder User kann eine oder mehrere Karten anlegen
+ */
+export const travelMaps = mysqlTable("travel_maps", {
+  id:          int("id").primaryKey().autoincrement(),
+  userId:      int("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  name:        varchar("name", { length: 255 }).notNull().default("Meine Weltreise"),
+  description: text("description"),
+  partnerId:   int("partner_id").references(() => users.id, { onDelete: "set null" }),
+  createdAt:   timestamp("created_at").defaultNow().notNull(),
+  updatedAt:   timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  userIdx:    index("travel_maps_user_idx").on(table.userId),
+  partnerIdx: index("travel_maps_partner_idx").on(table.partnerId),
+}));
+
+/**
+ * Bereiste Länder (ISO 3166-1 Alpha-2, z.B. "DE", "FR")
+ * visitedBy: 'user1' = nur Karteninhaber, 'user2' = nur Partner, 'both' = gemeinsam
+ */
+export const travelCountries = mysqlTable("travel_countries", {
+  id:          int("id").primaryKey().autoincrement(),
+  mapId:       int("map_id").notNull().references(() => travelMaps.id, { onDelete: "cascade" }),
+  countryCode: varchar("country_code", { length: 2 }).notNull(),
+  countryName: varchar("country_name", { length: 100 }).notNull().default(""),
+  visitedBy:   varchar("visited_by", { length: 10 }).notNull().default("user1"), // 'user1'|'user2'|'both'
+  visitedAt:   date("visited_at"),
+  notes:       text("notes"),
+  createdAt:   timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  mapIdx:     index("travel_countries_map_idx").on(table.mapId),
+  uniqueCC:   uniqueIndex("travel_countries_unique").on(table.mapId, table.countryCode),
+}));
+
+/**
+ * Bereiste Städte
+ */
+export const travelCities = mysqlTable("travel_cities", {
+  id:          int("id").primaryKey().autoincrement(),
+  mapId:       int("map_id").notNull().references(() => travelMaps.id, { onDelete: "cascade" }),
+  name:        varchar("name", { length: 255 }).notNull(),
+  countryCode: varchar("country_code", { length: 2 }).notNull(),
+  countryName: varchar("country_name", { length: 100 }).notNull().default(""),
+  lat:         varchar("lat", { length: 20 }),
+  lng:         varchar("lng", { length: 20 }),
+  visitedBy:   varchar("visited_by", { length: 10 }).notNull().default("user1"),
+  visitedAt:   date("visited_at"),
+  notes:       text("notes"),
+  createdAt:   timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  mapIdx: index("travel_cities_map_idx").on(table.mapId),
+}));
+
+/**
+ * Sehenswürdigkeiten
+ */
+export const travelSights = mysqlTable("travel_sights", {
+  id:          int("id").primaryKey().autoincrement(),
+  mapId:       int("map_id").notNull().references(() => travelMaps.id, { onDelete: "cascade" }),
+  cityId:      int("city_id").references(() => travelCities.id, { onDelete: "set null" }),
+  name:        varchar("name", { length: 255 }).notNull(),
+  category:    varchar("category", { length: 50 }).notNull().default("Sonstiges"),
+  countryCode: varchar("country_code", { length: 2 }).notNull(),
+  countryName: varchar("country_name", { length: 100 }).notNull().default(""),
+  lat:         varchar("lat", { length: 20 }),
+  lng:         varchar("lng", { length: 20 }),
+  visitedBy:   varchar("visited_by", { length: 10 }).notNull().default("user1"),
+  visitedAt:   date("visited_at"),
+  notes:       text("notes"),
+  createdAt:   timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  mapIdx:  index("travel_sights_map_idx").on(table.mapId),
+  cityIdx: index("travel_sights_city_idx").on(table.cityId),
+}));
+
+// ============================================================
 // GÄSTEBUCH
 // ============================================================
 
@@ -557,6 +665,32 @@ export const fdBasbilder = mysqlTable("basbilder", {
 });
 
 // ============================================================
+// RELATIONS – WELTREISE
+// ============================================================
+
+export const travelMapsRelations = relations(travelMaps, ({ one, many }) => ({
+  user:      one(users,   { fields: [travelMaps.userId],    references: [users.id], relationName: "travelMapOwner" }),
+  partner:   one(users,   { fields: [travelMaps.partnerId], references: [users.id], relationName: "travelMapPartner" }),
+  countries: many(travelCountries),
+  cities:    many(travelCities),
+  sights:    many(travelSights),
+}));
+
+export const travelCountriesRelations = relations(travelCountries, ({ one }) => ({
+  map: one(travelMaps, { fields: [travelCountries.mapId], references: [travelMaps.id] }),
+}));
+
+export const travelCitiesRelations = relations(travelCities, ({ one, many }) => ({
+  map:    one(travelMaps, { fields: [travelCities.mapId], references: [travelMaps.id] }),
+  sights: many(travelSights),
+}));
+
+export const travelSightsRelations = relations(travelSights, ({ one }) => ({
+  map:  one(travelMaps,   { fields: [travelSights.mapId],  references: [travelMaps.id] }),
+  city: one(travelCities, { fields: [travelSights.cityId], references: [travelCities.id] }),
+}));
+
+// ============================================================
 // TYPE EXPORTS
 // ============================================================
 
@@ -587,3 +721,15 @@ export type NewFdFotogruppenverkn = typeof fdFotogruppenverkn.$inferInsert;
 export type FdBas        = typeof fdBas.$inferSelect;
 export type FdBasbild    = typeof fdBasbilder.$inferSelect;
 export type NewFdBasbild = typeof fdBasbilder.$inferInsert;
+// GPX
+export type FdGpx    = typeof fdGpx.$inferSelect;
+export type NewFdGpx = typeof fdGpx.$inferInsert;
+// Weltreise
+export type TravelMap     = typeof travelMaps.$inferSelect;
+export type NewTravelMap  = typeof travelMaps.$inferInsert;
+export type TravelCountry    = typeof travelCountries.$inferSelect;
+export type NewTravelCountry = typeof travelCountries.$inferInsert;
+export type TravelCity    = typeof travelCities.$inferSelect;
+export type NewTravelCity = typeof travelCities.$inferInsert;
+export type TravelSight    = typeof travelSights.$inferSelect;
+export type NewTravelSight = typeof travelSights.$inferInsert;

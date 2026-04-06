@@ -25,6 +25,8 @@ import {
   Tag,
 } from "lucide-react";
 import DownloadButton from "./DownloadButton";
+import { Suspense } from "react";
+import AlbumGpxPanel from "@/components/gpx/AlbumGpxPanel";
 import PhotoThumbnail from "./PhotoThumbnail";
 import AlbumCoverHero from "./AlbumCoverHero";
 import AlbumSlideshow from "./AlbumSlideshow";
@@ -805,6 +807,13 @@ export default async function AlbumPage({ params }: Props) {
               ))}
             </div>
           </section>
+        )}
+
+        {/* ── GPX-Tracks (nur für eingeloggte User, unter den Fotos) ── */}
+        {session?.user && (
+          <Suspense fallback={null}>
+            <AlbumGpxPanel albumId={album.id} />
+          </Suspense>
         )}
       </div>
     </div>

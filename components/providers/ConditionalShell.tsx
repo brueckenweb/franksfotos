@@ -10,7 +10,7 @@ import { usePathname } from "next/navigation";
 import type { ReactNode } from "react";
 
 // Routen, auf denen Header + Footer ausgeblendet werden
-const ROUTES_WITHOUT_SHELL = ["/admin", "/fotodatenbank"];
+const ROUTES_WITHOUT_SHELL = ["/admin", "/fotodatenbank", "/weltreise/"];
 
 interface ConditionalShellProps {
   header: ReactNode;

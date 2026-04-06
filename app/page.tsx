@@ -8,6 +8,7 @@ import { eq, count, and, inArray } from "drizzle-orm";
 import { Camera, Film, FolderOpen } from "lucide-react";
 import { auth } from "@/auth";
 import GuestbookPanel from "@/components/GuestbookPanel";
+import WorldMapPanel from "@/components/reisen/WorldMapPanel";
 
 /** Gibt alle Nachkommen-IDs eines Albums zurück (BFS) */
 function getDescendantIds(albumId: number, childMap: Map<number, number[]>): number[] {
@@ -384,6 +385,9 @@ export default async function HomePage() {
       {currentUserName && (
         <GuestbookPanel currentUserName={currentUserName} />
       )}
+
+      {/* ── Bereiste Länder / Weltreise (für alle Besucher sichtbar) ─── */}
+      <WorldMapPanel isOwner={session?.user?.id === "1"} />
     </div>
   );
 }

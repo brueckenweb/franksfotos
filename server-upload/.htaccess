@@ -29,6 +29,11 @@ AddType image/webp        .webp
     Allow from all
 </Files>
 
+<Files "gpx-upload.php">
+    Order Allow,Deny
+    Allow from all
+</Files>
+
 # ==============================================================
 # MEDIENDATEIEN: Caching für Bilder/Videos
 # ==============================================================
@@ -44,7 +49,7 @@ AddType image/webp        .webp
 # CORS: Bilder/Videos öffentlich zugänglich (frank-sellke.de)
 # ==============================================================
 <IfModule mod_headers.c>
-    <FilesMatch "\.(jpg|jpeg|png|webp|gif|mp4|mov|webm|mkv|avi)$">
+    <FilesMatch "\.(jpg|jpeg|png|webp|gif|mp4|mov|webm|mkv|avi|gpx)$">
         Header always set Access-Control-Allow-Origin "*"
     </FilesMatch>
 </IfModule>

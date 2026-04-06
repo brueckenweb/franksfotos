@@ -10,7 +10,8 @@ Diese Dateien müssen auf den Webspace von **pics.frank-sellke.de** hochgeladen 
 
 | Datei | Ziel auf dem Server | Beschreibung |
 |-------|---------------------|--------------|
-| `upload.php` | `/upload.php` (Webroot) | Empfängt Uploads von der Next.js-App |
+| `upload.php` | `/upload.php` (Webroot) | Empfängt Foto/Video-Uploads |
+| `gpx-upload.php` | `/gpx-upload.php` (Webroot) | Empfängt GPX-Track-Uploads |
 | `.htaccess` | `/.htaccess` (Webroot) | Sicherheit, Caching, CORS |
 
 ---

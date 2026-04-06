@@ -7,7 +7,7 @@ import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import Link from "next/link";
-import { Database, LayoutDashboard, List, Search, Images } from "lucide-react";
+import { Database, LayoutDashboard, List, Search, Images, MapPin } from "lucide-react";
 
 export const metadata: Metadata = {
   title: "Fotodatenbank – FranksFotos",
@@ -71,6 +71,13 @@ export default async function FotodatenbankLayout({
             >
               <List className="w-4 h-4" />
               <span className="hidden sm:inline">Fotogruppen</span>
+            </Link>
+            <Link
+              href="/fotodatenbank/gpx"
+              className="flex items-center gap-2 text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg px-3 py-2 text-sm transition-colors"
+            >
+              <MapPin className="w-4 h-4" />
+              <span className="hidden sm:inline">GPX-Tracks</span>
             </Link>
             <Link
               href="/admin/fotos"

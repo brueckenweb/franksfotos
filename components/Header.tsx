@@ -1,6 +1,6 @@
 import Link from "next/link";
 import Image from "next/image";
-import { LogIn, Images } from "lucide-react";
+import { LogIn, Images, Globe } from "lucide-react";
 import { auth } from "@/auth";
 import { isAdmin } from "@/lib/auth/permissions";
 
@@ -12,7 +12,7 @@ export default async function Header() {
   const showAdminLink = isAdmin(userPermissions, isMainAdmin);
 
   return (
-    <header className="border-b border-gray-800 bg-gray-900 sticky top-0 z-10">
+    <header className="border-b border-gray-800 bg-gray-900 sticky top-0 z-[1100]">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-14 sm:h-16">
           {/* Logo */}
@@ -21,7 +21,8 @@ export default async function Header() {
               src="/logoFF.png"
               alt="FranksFotos Logo"
               width={40}
-              height={36}
+              height={35}
+              style={{ height: "auto" }}
               className="rounded-lg"
               priority
             />
@@ -41,6 +42,15 @@ export default async function Header() {
 
             {session?.user ? (
               <>
+                {/* Reisen-Link – nur für eingeloggte User */}
+                <Link
+                  href="/reisen"
+                  className="flex items-center gap-1.5 text-sm text-gray-400 hover:text-blue-400 transition-colors px-2 py-1.5 rounded-lg hover:bg-gray-800"
+                >
+                  <Globe className="w-4 h-4" />
+                  <span className="hidden sm:inline">Reisen</span>
+                </Link>
+
                 {showAdminLink && (
                   <Link
                     href="/admin"

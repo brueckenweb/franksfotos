@@ -25,6 +25,7 @@
     "@tiptap/extension-underline": "^3.21.0",
     "@tiptap/react": "^3.21.0",
     "@tiptap/starter-kit": "^3.21.0",
+    "@tmcw/togeojson": "^7.1.2",
     "@types/busboy": "^1.5.4",
     "@types/leaflet": "^1.9.21",
     "@types/nodemailer": "^7.0.11",
