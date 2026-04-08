@@ -4,7 +4,8 @@ import { postItNotes } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { auth } from "@/auth";
 
-// ── Hilfsfunktion: Admin-Check ────────────────────────────────────────────────
+const VALID_SICHTBARKEIT = ["alle", "angemeldet", "nicht_angemeldet"] as const;
+
 async function requireAdmin() {
   const session = await auth();
   const user = session?.user as { id?: string; isMainAdmin?: boolean } | undefined;
@@ -13,7 +14,6 @@ async function requireAdmin() {
 }
 
 // ── PATCH /api/postit/[id] ────────────────────────────────────────────────────
-// Aktualisiert ein Post-It (Nachricht, Farbe, Slot, isActive). Nur Admin.
 export async function PATCH(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }
@@ -30,7 +30,6 @@ export async function PATCH(
       return NextResponse.json({ error: "Ungültige ID" }, { status: 400 });
     }
 
-    // Existiert das Post-It?
     const [existing] = await db
       .select()
       .from(postItNotes)
@@ -41,13 +40,18 @@ export async function PATCH(
     }
 
     const body = await request.json();
-    const { message, color, slot, isActive } = body;
+    const { message, color, slot, isActive, sichtbarkeit } = body;
 
     const updateData: Partial<typeof postItNotes.$inferInsert> = {};
 
-    if (message !== undefined) updateData.message = message.trim();
-    if (slot !== undefined)    updateData.slot    = slot.trim();
-    if (isActive !== undefined) updateData.isActive = Boolean(isActive);
+    if (message !== undefined)     updateData.message  = message.trim();
+    if (slot !== undefined)        updateData.slot     = slot.trim();
+    if (isActive !== undefined)    updateData.isActive = Boolean(isActive);
+    if (sichtbarkeit !== undefined) {
+      updateData.sichtbarkeit = VALID_SICHTBARKEIT.includes(sichtbarkeit)
+        ? sichtbarkeit
+        : existing.sichtbarkeit;
+    }
     if (color !== undefined) {
       const validColors = ["yellow", "pink", "blue", "green", "orange"];
       updateData.color = validColors.includes(color) ? color : existing.color;
@@ -69,7 +73,6 @@ export async function PATCH(
 }
 
 // ── DELETE /api/postit/[id] ───────────────────────────────────────────────────
-// Löscht ein Post-It endgültig. Nur Admin.
 export async function DELETE(
   request: NextRequest,
   { params }: { params: Promise<{ id: string }> }

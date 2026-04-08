@@ -262,7 +262,7 @@ export default async function HomePage() {
       <section className="py-8 px-4">
         <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-center gap-6">
           {/* Text-Block */}
-          <div className="text-center sm:text-left w-full sm:w-2/3">
+          <div className="text-center w-full sm:w-2/3">
             <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-amber-500/10 border border-amber-500/20 mb-6">
               <Camera className="w-10 h-10 text-amber-400" />
             </div>

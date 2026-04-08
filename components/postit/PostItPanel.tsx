@@ -9,6 +9,7 @@ interface PostIt {
   color: string;
   slot: string;
   isActive: boolean;
+  sichtbarkeit: string;
   createdAt: string;
 }
 
@@ -53,6 +54,7 @@ export default function PostItPanel({ slot, className = "" }: Props) {
           key={note.id}
           message={note.message}
           color={note.color}
+          sichtbarkeit={note.sichtbarkeit as "alle" | "angemeldet" | "nicht_angemeldet"}
         />
       ))}
     </div>

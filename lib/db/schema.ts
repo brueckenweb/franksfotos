@@ -652,7 +652,8 @@ export const postItNotes = mysqlTable("post_it_notes", {
   message:   text("message").notNull(),
   color:     varchar("color", { length: 20 }).notNull().default("yellow"),  // yellow | pink | blue | green | orange
   slot:      varchar("slot", { length: 100 }).notNull(),                    // z.B. "home"
-  isActive:  boolean("is_active").notNull().default(true),
+  isActive:    boolean("is_active").notNull().default(true),
+  sichtbarkeit: varchar("sichtbarkeit", { length: 20 }).notNull().default("alle"), // "alle" | "angemeldet" | "nicht_angemeldet"
   createdBy: int("created_by").references(() => users.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
