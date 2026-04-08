@@ -20,6 +20,7 @@ interface Track {
   albumName: string | null;
   albumSlug: string | null;
   userName: string | null;
+  fotogruppeId: number | null;
 }
 
 interface Album { id: number; name: string; parentId: number | null }
@@ -151,6 +152,7 @@ export default function GpxListClient({ tracks: initial, alben }: Props) {
             beschreibung: null, typ: editTrack.typ, land: editTrack.land,
             laengeKm: editTrack.laengeKm, hoehmAuf: editTrack.hoehmAuf,
             datumTour: editTrack.datumTour, albumId: editTrack.albumId,
+            fotogruppeId: editTrack.fotogruppeId,
           }}
           alben={alben}
           onClose={() => setEditTrack(null)}

@@ -30,12 +30,12 @@ export interface GpxTrackMeta {
 interface GpxMetaEditProps {
   track: GpxTrackMeta;
   alben: Album[];
-  fotogruppen: Fotogruppe[];
+  fotogruppen?: Fotogruppe[];
   onClose: () => void;
   onSaved: (updated: GpxTrackMeta) => void;
 }
 
-export default function GpxMetaEdit({ track, alben, fotogruppen, onClose, onSaved }: GpxMetaEditProps) {
+export default function GpxMetaEdit({ track, alben, fotogruppen = [], onClose, onSaved }: GpxMetaEditProps) {
   const [titel,        setTitel]        = useState(track.titel);
   const [beschreibung, setBeschreibung] = useState(track.beschreibung ?? "");
   const [typ,          setTyp]          = useState(track.typ);
