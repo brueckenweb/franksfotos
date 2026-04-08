@@ -70,3 +70,323 @@ img {
            placeholder:text-gray-500;
   }
 }
+
+/* ── Post-It Haftnotizen ────────────────────────────────────────────────── */
+
+.postit-note {
+  position: relative;
+  padding: 1.25rem;
+  min-height: 160px;
+  margin-top: 24px; /* Platz für die Pinnadel */
+  box-shadow:
+    0 10px 20px rgba(0, 0, 0, 0.15),
+    0 6px 10px rgba(0, 0, 0, 0.12),
+    0 3px 5px rgba(0, 0, 0, 0.08);
+  transform: rotate(-1deg);
+  transition: all 0.3s ease;
+  border-radius: 2px;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Pinnadel */
+.postit-pin {
+  position: absolute;
+  top: -28px;
+  left: 24px;
+  width: 40px;
+  height: 40px;
+  z-index: 10;
+  pointer-events: none;
+}
+
+/* Nadel-Kopf */
+.postit-pin::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 26px;
+  height: 26px;
+  background: radial-gradient(circle at 35% 35%, #4a5568, #1a202c);
+  border-radius: 50%;
+  box-shadow:
+    0 4px 8px rgba(0, 0, 0, 0.4),
+    inset -3px -3px 5px rgba(0, 0, 0, 0.3),
+    inset 3px 3px 5px rgba(255, 255, 255, 0.1);
+  transform: rotate(-25deg);
+}
+
+/* Nadel-Spitze */
+.postit-pin::after {
+  content: '';
+  position: absolute;
+  top: 20px;
+  left: 11px;
+  width: 4px;
+  height: 22px;
+  background: linear-gradient(to bottom, #718096 0%, #4a5568 50%, #2d3748 100%);
+  border-radius: 0 0 50% 50%;
+  box-shadow: 1px 0 3px rgba(0, 0, 0, 0.3);
+  transform: rotate(-25deg);
+  transform-origin: top center;
+}
+
+/* Farbige Pinnadeln */
+.postit-yellow .postit-pin::before { background: radial-gradient(circle at 35% 35%, #fbbf24, #d97706); }
+.postit-pink   .postit-pin::before { background: radial-gradient(circle at 35% 35%, #ec4899, #be185d); }
+.postit-blue   .postit-pin::before { background: radial-gradient(circle at 35% 35%, #3b82f6, #1e40af); }
+.postit-green  .postit-pin::before { background: radial-gradient(circle at 35% 35%, #10b981, #047857); }
+.postit-orange .postit-pin::before { background: radial-gradient(circle at 35% 35%, #f97316, #c2410c); }
+
+/* Hover */
+.postit-note:hover {
+  transform: rotate(0deg) scale(1.03);
+  box-shadow:
+    0 20px 30px rgba(0, 0, 0, 0.25),
+    0 12px 18px rgba(0, 0, 0, 0.18);
+  z-index: 10;
+}
+
+.postit-note:nth-child(even) { transform: rotate(1deg); }
+.postit-note:nth-child(3n)   { transform: rotate(-2deg); }
+
+/* Farbvarianten */
+.postit-yellow { background: linear-gradient(135deg, #feff9c 0%, #fff740 100%); }
+.postit-pink   { background: linear-gradient(135deg, #ffb3d9 0%, #ff80bf 100%); }
+.postit-blue   { background: linear-gradient(135deg, #a8e6ff 0%, #7dd3fc 100%); }
+.postit-green  { background: linear-gradient(135deg, #b8f5b8 0%, #86efac 100%); }
+.postit-orange { background: linear-gradient(135deg, #ffd4a3 0%, #ffb366 100%); }
+
+/* Inhalt */
+.postit-author {
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: #374151;
+  margin-bottom: 0.5rem;
+}
+
+.postit-message {
+  font-size: 0.9375rem;
+  line-height: 1.6;
+  color: #1f2937;
+  word-wrap: break-word;
+  flex: 1;
+  white-space: normal;
+}
+
+/* Prose-Stile für TipTap-HTML innerhalb der Haftnotiz */
+.postit-message p          { margin: 0 0 0.4em; }
+.postit-message p:last-child { margin-bottom: 0; }
+.postit-message strong     { font-weight: 700; }
+.postit-message em         { font-style: italic; }
+.postit-message u          { text-decoration: underline; }
+.postit-message ul         { list-style: disc; padding-left: 1.25rem; margin: 0.25rem 0; }
+.postit-message ol         { list-style: decimal; padding-left: 1.25rem; margin: 0.25rem 0; }
+.postit-message li         { margin: 0.1rem 0; }
+.postit-message h2         { font-size: 1.15em; font-weight: 700; margin: 0.5em 0 0.25em; color: #111827; }
+.postit-message h3         { font-size: 1.0em;  font-weight: 700; margin: 0.4em 0 0.2em;  color: #111827; }
+.postit-message a          { color: #1d4ed8; text-decoration: underline; }
+.postit-message a:hover    { color: #1e40af; }
+
+/* Einblend-Animation für neue Post-Its */
+@keyframes postitFadeIn {
+  from { opacity: 0; transform: scale(0.85) rotate(-5deg); }
+  to   { opacity: 1; transform: scale(1)    rotate(-1deg); }
+}
+.postit-note.new { animation: postitFadeIn 0.4s ease-out; }
+
+/* ── TipTap Post-It Editor (Admin) ─────────────────────────────────────── */
+
+.postit-editor-wrapper {
+  border: 1px solid #374151;
+  border-radius: 0.5rem;
+  overflow: visible;           /* sichtbar für Dropdown-Panels */
+  background: #1f2937;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  position: relative;
+}
+
+.postit-editor-wrapper:focus-within {
+  border-color: #f59e0b;
+  box-shadow: 0 0 0 1px rgba(245, 158, 11, 0.25);
+}
+
+/* Toolbar */
+.postit-editor-toolbar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 2px;
+  padding: 5px 8px;
+  background: #111827;
+  border-bottom: 1px solid #374151;
+  border-radius: 0.5rem 0.5rem 0 0;
+}
+
+/* Toolbar-Button */
+.postit-tbtn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px;
+  min-width: 28px;
+  height: 28px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  color: #9ca3af;               /* gray-400 */
+  transition: color 0.15s, background 0.15s, border-color 0.15s;
+}
+.postit-tbtn:hover {
+  color: #f9fafb;
+  background: #374151;
+  border-color: #4b5563;
+}
+.postit-tbtn-active {
+  color: #fbbf24 !important;    /* amber-400 */
+  background: rgba(245, 158, 11, 0.15) !important;
+  border-color: rgba(245, 158, 11, 0.3) !important;
+}
+
+/* Trennlinie */
+.postit-editor-sep {
+  display: inline-block;
+  width: 1px;
+  height: 18px;
+  background: #4b5563;
+  margin: 0 3px;
+  align-self: center;
+  flex-shrink: 0;
+}
+
+/* ProseMirror-Eingabebereich */
+.postit-editor-wrapper .ProseMirror {
+  padding: 10px 12px;
+  min-height: 130px;
+  max-height: 340px;
+  overflow-y: auto;
+  outline: none;
+  color: #f9fafb;
+  font-size: 0.875rem;
+  line-height: 1.65;
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+.postit-editor-wrapper .ProseMirror-focused { caret-color: #f59e0b; }
+
+/* Prose-Elemente im Editor */
+.postit-editor-wrapper .ProseMirror p            { margin: 0 0 0.4em; }
+.postit-editor-wrapper .ProseMirror p:last-child { margin-bottom: 0; }
+.postit-editor-wrapper .ProseMirror strong       { font-weight: 700; }
+.postit-editor-wrapper .ProseMirror em           { font-style: italic; }
+.postit-editor-wrapper .ProseMirror u            { text-decoration: underline; }
+.postit-editor-wrapper .ProseMirror h2           { font-size: 1.2em; font-weight: 700; margin: 0.6em 0 0.3em; }
+.postit-editor-wrapper .ProseMirror h3           { font-size: 1.05em; font-weight: 700; margin: 0.5em 0 0.25em; }
+.postit-editor-wrapper .ProseMirror ul           { list-style: disc; padding-left: 1.4rem; margin: 0.25rem 0; }
+.postit-editor-wrapper .ProseMirror ol           { list-style: decimal; padding-left: 1.4rem; margin: 0.25rem 0; }
+.postit-editor-wrapper .ProseMirror li           { margin: 0.1rem 0; }
+.postit-editor-wrapper .ProseMirror a            { color: #60a5fa; text-decoration: underline; cursor: pointer; }
+.postit-editor-wrapper .ProseMirror a:hover      { color: #93c5fd; }
+
+/* Code-View Textarea */
+.postit-editor-code {
+  display: block;
+  width: 100%;
+  min-height: 130px;
+  padding: 10px 12px;
+  background: #111827;
+  color: #86efac;               /* green-300 */
+  font-family: 'Consolas', 'Monaco', monospace;
+  font-size: 0.8rem;
+  line-height: 1.6;
+  border: none;
+  outline: none;
+  resize: vertical;
+}
+
+/* ── Dropdowns (Hover-based wie brueckenweb) ───────────── */
+.postit-dropdown {
+  position: relative;
+  display: inline-flex;
+}
+
+.postit-dropdown-panel {
+  display: none;
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  z-index: 9999;
+  background: #1f2937;
+  border: 1px solid #4b5563;
+  border-radius: 6px;
+  padding: 6px;
+  box-shadow: 0 8px 20px rgba(0,0,0,0.5);
+  min-width: 130px;
+}
+
+.postit-dropdown-panel-open {
+  display: grid !important;
+}
+
+.postit-color-grid {
+  grid-template-columns: repeat(5, 24px);
+  gap: 4px;
+}
+
+.postit-highlight-grid {
+  grid-template-columns: repeat(4, 24px);
+  gap: 4px;
+}
+
+.postit-color-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 4px;
+  border: 1px solid rgba(255,255,255,0.15);
+  cursor: pointer;
+  transition: transform 0.1s, border-color 0.1s;
+}
+.postit-color-swatch:hover {
+  transform: scale(1.2);
+  border-color: #f59e0b;
+}
+
+.postit-color-remove {
+  background: #374151 !important;
+  color: #9ca3af;
+  font-size: 11px;
+  font-weight: bold;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.postit-color-remove:hover {
+  background: #4b1414 !important;
+  color: #fca5a5;
+  border-color: #dc2626;
+}
+
+/* ── Link-Popup ──────────────────────────────────────────── */
+.postit-popup-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9998;
+  background: rgba(0,0,0,0.5);
+}
+
+.postit-link-popup {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  z-index: 9999;
+  background: #1f2937;
+  border: 1px solid #4b5563;
+  border-radius: 0.75rem;
+  padding: 1rem 1.25rem;
+  width: 380px;
+  max-width: 90vw;
+  box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+}

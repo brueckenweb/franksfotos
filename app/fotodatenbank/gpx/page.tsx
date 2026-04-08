@@ -7,10 +7,9 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { fdGpx, albums, users } from "@/lib/db/schema";
-import { eq, desc } from "drizzle-orm";
-import { Plus, MapPin, Mountain, Calendar, Pencil, Map, Trash2 } from "lucide-react";
-import { TYP_EMOJI } from "@/lib/gpx/utils";
+import { fdGpx, fdFotogruppen, albums, users } from "@/lib/db/schema";
+import { eq, desc, asc } from "drizzle-orm";
+import { Plus } from "lucide-react";
 import GpxListClient from "./GpxListClient";
 
 export const metadata = { title: "GPX-Tracks – Fotodatenbank" };
@@ -21,22 +20,25 @@ export default async function GpxUebersichtPage() {
 
   const rows = await db
     .select({
-      id:          fdGpx.id,
-      titel:       fdGpx.titel,
-      typ:         fdGpx.typ,
-      land:        fdGpx.land,
-      laengeKm:    fdGpx.laengeKm,
-      hoehmAuf:    fdGpx.hoehmAuf,
-      datumTour:   fdGpx.datumTour,
-      eingetragen: fdGpx.eingetragen,
-      albumId:     fdGpx.albumId,
-      albumName:   albums.name,
-      albumSlug:   albums.slug,
-      userName:    users.name,
+      id:              fdGpx.id,
+      titel:           fdGpx.titel,
+      typ:             fdGpx.typ,
+      land:            fdGpx.land,
+      laengeKm:        fdGpx.laengeKm,
+      hoehmAuf:        fdGpx.hoehmAuf,
+      datumTour:       fdGpx.datumTour,
+      eingetragen:     fdGpx.eingetragen,
+      albumId:         fdGpx.albumId,
+      albumName:       albums.name,
+      albumSlug:       albums.slug,
+      fotogruppeId:    fdGpx.fotogruppeId,
+      fotogruppenName: fdFotogruppen.name,
+      userName:        users.name,
     })
     .from(fdGpx)
-    .leftJoin(albums, eq(fdGpx.albumId, albums.id))
-    .leftJoin(users,  eq(fdGpx.userId,  users.id))
+    .leftJoin(albums,        eq(fdGpx.albumId,      albums.id))
+    .leftJoin(users,         eq(fdGpx.userId,       users.id))
+    .leftJoin(fdFotogruppen, eq(fdGpx.fotogruppeId, fdFotogruppen.idfgruppe))
     .orderBy(desc(fdGpx.eingetragen))
     .limit(200);
 
@@ -46,6 +48,13 @@ export default async function GpxUebersichtPage() {
     .from(albums)
     .where(eq(albums.isActive, true))
     .orderBy(albums.sortOrder, albums.name);
+
+  // Fotogruppen für Dropdown (nur aktive)
+  const alleFotogruppen = await db
+    .select({ idfgruppe: fdFotogruppen.idfgruppe, name: fdFotogruppen.name })
+    .from(fdFotogruppen)
+    .where(eq(fdFotogruppen.einaktiv, "ja"))
+    .orderBy(asc(fdFotogruppen.name));
 
   return (
     <div className="p-6">
@@ -63,7 +72,7 @@ export default async function GpxUebersichtPage() {
         </Link>
       </div>
 
-      <GpxListClient tracks={rows} alben={alleAlben} />
+      <GpxListClient tracks={rows} alben={alleAlben} fotogruppen={alleFotogruppen} />
     </div>
   );
 }

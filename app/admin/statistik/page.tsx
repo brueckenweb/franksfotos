@@ -65,33 +65,105 @@ function fmtDate(s: string | null) {
   });
 }
 
-// Einfacher Mini-Balken-Chart (ohne externe Bibliothek)
-function MiniBarChart({ data }: { data: DailyStat[] }) {
+// SVG-Linien-Chart (glatte Kurve, ohne externe Bibliothek)
+function MiniLineChart({ data }: { data: DailyStat[] }) {
+  const [tooltip, setTooltip] = useState<{ day: string; views: number; xPct: number; yPct: number } | null>(null);
+
   if (!data.length) return <p className="text-gray-500 text-sm">Keine Daten vorhanden.</p>;
 
+  const W = 800;
+  const H = 96;
+  const PAD = 4;
+
   const max = Math.max(...data.map((d) => d.views), 1);
+  const n = data.length;
+
+  // Koordinate für jeden Datenpunkt
+  const pts = data.map((d, i) => ({
+    x: PAD + (i / Math.max(n - 1, 1)) * (W - PAD * 2),
+    y: PAD + (1 - d.views / max) * (H - PAD * 2),
+    ...d,
+  }));
+
+  // Smooth-Bezier-Pfad
+  function smoothPath(points: typeof pts): string {
+    if (points.length < 2) return `M ${points[0].x} ${points[0].y}`;
+    let d = `M ${points[0].x} ${points[0].y}`;
+    for (let i = 1; i < points.length; i++) {
+      const prev = points[i - 1];
+      const curr = points[i];
+      const cpx = (prev.x + curr.x) / 2;
+      d += ` C ${cpx} ${prev.y}, ${cpx} ${curr.y}, ${curr.x} ${curr.y}`;
+    }
+    return d;
+  }
+
+  const linePath = smoothPath(pts);
+  const areaPath =
+    linePath +
+    ` L ${pts[pts.length - 1].x} ${H} L ${pts[0].x} ${H} Z`;
 
   return (
-    <div className="flex items-end gap-0.5 h-24 w-full overflow-x-auto">
-      {data.map((d) => {
-        const pct = Math.round((d.views / max) * 100);
-        return (
-          <div
-            key={d.day}
-            className="flex-1 min-w-[6px] group relative"
-            title={`${d.day}: ${d.views} Aufrufe`}
-          >
-            <div
-              className="bg-cyan-500/60 group-hover:bg-cyan-400 rounded-t transition-colors"
-              style={{ height: `${Math.max(pct, 2)}%` }}
-            />
-            {/* Tooltip */}
-            <div className="absolute bottom-full mb-1 left-1/2 -translate-x-1/2 bg-gray-800 text-white text-xs px-2 py-1 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none z-10">
-              {d.day}<br />{d.views} Aufrufe
-            </div>
-          </div>
-        );
-      })}
+    <div className="relative w-full" style={{ height: H }}>
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none"
+        className="w-full h-full"
+      >
+        <defs>
+          <linearGradient id="chartGrad" x1="0" y1="0" x2="0" y2="1">
+            <stop offset="0%" stopColor="#22d3ee" stopOpacity="0.35" />
+            <stop offset="100%" stopColor="#22d3ee" stopOpacity="0.03" />
+          </linearGradient>
+        </defs>
+        {/* Gefüllte Fläche */}
+        <path d={areaPath} fill="url(#chartGrad)" />
+        {/* Linie */}
+        <path
+          d={linePath}
+          fill="none"
+          stroke="#22d3ee"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        {/* Datenpunkte */}
+        {pts.map((p) => (
+          <circle
+            key={p.day}
+            cx={p.x}
+            cy={p.y}
+            r={tooltip?.day === p.day ? 5 : 3}
+            fill="#22d3ee"
+            className="cursor-pointer transition-all"
+            onMouseEnter={() =>
+              setTooltip({
+                day: p.day,
+                views: p.views,
+                xPct: (p.x / W) * 100,
+                yPct: (p.y / H) * 100,
+              })
+            }
+            onMouseLeave={() => setTooltip(null)}
+          />
+        ))}
+      </svg>
+
+      {/* Tooltip-Overlay */}
+      {tooltip && (
+        <div
+          className="absolute z-20 pointer-events-none bg-gray-800 border border-gray-600 text-white text-xs px-2.5 py-1.5 rounded-lg shadow-lg whitespace-nowrap -translate-x-1/2 -translate-y-full"
+          style={{
+            left: `${tooltip.xPct}%`,
+            top: `${tooltip.yPct}%`,
+            marginTop: "-8px",
+          }}
+        >
+          <span className="text-gray-400">{tooltip.day}</span>
+          <br />
+          <span className="font-semibold text-cyan-400">{tooltip.views} Aufrufe</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -230,7 +302,7 @@ export default function StatistikPage() {
                 <TrendingUp className="w-4 h-4 text-cyan-400" />
                 Tägliche Aufrufe – letzte {days} Tage
               </h2>
-              <MiniBarChart data={data.dailyStats} />
+              <MiniLineChart data={data.dailyStats} />
               <div className="flex justify-between text-xs text-gray-600 mt-1">
                 <span>{data.dailyStats[0]?.day}</span>
                 <span>{data.dailyStats[data.dailyStats.length - 1]?.day}</span>

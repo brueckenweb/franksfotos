@@ -12,6 +12,7 @@ import AlbumTreeSelect from "@/app/admin/alben/AlbumTreeSelect";
 const TYPEN = ["Wanderung", "Autofahrt", "Fahrrad", "Schifffahrt", "Flugzeug"] as const;
 
 interface Album { id: number; name: string; parentId: number | null }
+interface Fotogruppe { idfgruppe: number; name: string }
 
 export interface GpxTrackMeta {
   id: number;
@@ -23,16 +24,18 @@ export interface GpxTrackMeta {
   hoehmAuf: number | null;
   datumTour: Date | string | null;
   albumId: number | null;
+  fotogruppeId: number | null;
 }
 
 interface GpxMetaEditProps {
   track: GpxTrackMeta;
   alben: Album[];
+  fotogruppen: Fotogruppe[];
   onClose: () => void;
   onSaved: (updated: GpxTrackMeta) => void;
 }
 
-export default function GpxMetaEdit({ track, alben, onClose, onSaved }: GpxMetaEditProps) {
+export default function GpxMetaEdit({ track, alben, fotogruppen, onClose, onSaved }: GpxMetaEditProps) {
   const [titel,        setTitel]        = useState(track.titel);
   const [beschreibung, setBeschreibung] = useState(track.beschreibung ?? "");
   const [typ,          setTyp]          = useState(track.typ);
@@ -45,6 +48,7 @@ export default function GpxMetaEdit({ track, alben, onClose, onSaved }: GpxMetaE
     return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
   });
   const [albumId,      setAlbumId]      = useState(String(track.albumId ?? ""));
+  const [fotogruppeId, setFotogruppeId] = useState(String(track.fotogruppeId ?? ""));
   const [speichern,    setSpeichern]    = useState(false);
   const [fehler,       setFehler]       = useState<string | null>(null);
 
@@ -65,7 +69,8 @@ export default function GpxMetaEdit({ track, alben, onClose, onSaved }: GpxMetaE
           laengeKm:     laengeKm || null,
           hoehmAuf:     hoehmAuf ? parseInt(hoehmAuf) : null,
           datumTour:    datumTour || null,
-          albumId:      albumId  ? parseInt(albumId)  : null,
+          albumId:      albumId      ? parseInt(albumId)      : null,
+          fotogruppeId: fotogruppeId ? parseInt(fotogruppeId) : null,
         }),
       });
       if (!res.ok) throw new Error((await res.json()).error ?? "Fehler");
@@ -78,7 +83,8 @@ export default function GpxMetaEdit({ track, alben, onClose, onSaved }: GpxMetaE
         laengeKm:     laengeKm || null,
         hoehmAuf:     hoehmAuf ? parseInt(hoehmAuf) : null,
         datumTour:    datumTour ? new Date(datumTour) : null,
-        albumId:      albumId  ? parseInt(albumId)   : null,
+        albumId:      albumId      ? parseInt(albumId)      : null,
+        fotogruppeId: fotogruppeId ? parseInt(fotogruppeId) : null,
       });
       onClose();
     } catch (e) {
@@ -98,7 +104,7 @@ export default function GpxMetaEdit({ track, alben, onClose, onSaved }: GpxMetaE
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto">
           <div>
             <label className="block text-sm font-medium text-gray-300 mb-1">Titel *</label>
             <input
@@ -147,6 +153,20 @@ export default function GpxMetaEdit({ track, alben, onClose, onSaved }: GpxMetaE
               <input type="date" value={datumTour} onChange={e => setDatumTour(e.target.value)}
                 className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500" />
             </div>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-300 mb-1">Fotogruppe</label>
+            <select
+              value={fotogruppeId}
+              onChange={e => setFotogruppeId(e.target.value)}
+              className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+            >
+              <option value="">– keine Fotogruppe –</option>
+              {fotogruppen.map(g => (
+                <option key={g.idfgruppe} value={String(g.idfgruppe)}>{g.name}</option>
+              ))}
+            </select>
           </div>
 
           <div>

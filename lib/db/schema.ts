@@ -383,16 +383,18 @@ export const fdGpx = mysqlTable("fd_gpx", {
   hoehmAuf:     int("hoehenm_auf"),
   datumTour:    date("datum_tour"),
   albumId:      int("album_id").references(() => albums.id, { onDelete: "set null" }),
+  fotogruppeId: int("fotogruppe_id"),  // soft-ref → fd_fotogruppen.idfgruppe (kein FK-Constraint wegen BIGINT/INT)
   gpxDateiname: varchar("gpx_dateiname", { length: 255 }).notNull().default(""),
   gpxUrl:       varchar("gpx_url", { length: 500 }).notNull(),
   eingetragen:  timestamp("eingetragen").defaultNow().notNull(),
   userId:       int("user_id").notNull().references(() => users.id, { onDelete: "restrict" }),
 }, (table) => ({
-  albumIdx:  index("fd_gpx_album_idx").on(table.albumId),
-  userIdx:   index("fd_gpx_user_idx").on(table.userId),
-  typIdx:    index("fd_gpx_typ_idx").on(table.typ),
-  landIdx:   index("fd_gpx_land_idx").on(table.land),
-  datumIdx:  index("fd_gpx_datum_idx").on(table.datumTour),
+  albumIdx:      index("fd_gpx_album_idx").on(table.albumId),
+  userIdx:       index("fd_gpx_user_idx").on(table.userId),
+  typIdx:        index("fd_gpx_typ_idx").on(table.typ),
+  landIdx:       index("fd_gpx_land_idx").on(table.land),
+  datumIdx:      index("fd_gpx_datum_idx").on(table.datumTour),
+  fotogruppeIdx: index("fd_gpx_fotogruppe_idx").on(table.fotogruppeId),
 }));
 
 // ============================================================
@@ -618,6 +620,49 @@ export const travelSights = mysqlTable("travel_sights", {
 }));
 
 // ============================================================
+// PASSWORT-RESET-TOKENS
+// ============================================================
+
+/**
+ * Passwort-Reset-Tokens – für die „Passwort vergessen"-Funktion
+ */
+export const passwordResetTokens = mysqlTable("password_reset_tokens", {
+  id:        int("id").primaryKey().autoincrement(),
+  userId:    int("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  token:     varchar("token", { length: 255 }).notNull().unique(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt:    timestamp("used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  tokenIdx:   uniqueIndex("prt_token_idx").on(table.token),
+  userIdx:    index("prt_user_idx").on(table.userId),
+  expiresIdx: index("prt_expires_idx").on(table.expiresAt),
+}));
+
+// ============================================================
+// POST-IT NOTES (Haftnotizen)
+// ============================================================
+
+/**
+ * Post-It Haftnotizen – können auf verschiedenen Seiten eingeblendet werden.
+ * slot = eindeutige Kennung der Position (z.B. "home", "alben", "weltreise")
+ */
+export const postItNotes = mysqlTable("post_it_notes", {
+  id:        int("id").primaryKey().autoincrement(),
+  message:   text("message").notNull(),
+  color:     varchar("color", { length: 20 }).notNull().default("yellow"),  // yellow | pink | blue | green | orange
+  slot:      varchar("slot", { length: 100 }).notNull(),                    // z.B. "home"
+  isActive:  boolean("is_active").notNull().default(true),
+  createdBy: int("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow().notNull(),
+}, (table) => ({
+  slotIdx:    index("postit_slot_idx").on(table.slot),
+  activeIdx:  index("postit_active_idx").on(table.isActive),
+  createdIdx: index("postit_created_idx").on(table.createdAt),
+}));
+
+// ============================================================
 // GÄSTEBUCH
 // ============================================================
 
@@ -724,6 +769,9 @@ export type NewFdBasbild = typeof fdBasbilder.$inferInsert;
 // GPX
 export type FdGpx    = typeof fdGpx.$inferSelect;
 export type NewFdGpx = typeof fdGpx.$inferInsert;
+// Post-It Notes
+export type PostItNote    = typeof postItNotes.$inferSelect;
+export type NewPostItNote = typeof postItNotes.$inferInsert;
 // Weltreise
 export type TravelMap     = typeof travelMaps.$inferSelect;
 export type NewTravelMap  = typeof travelMaps.$inferInsert;

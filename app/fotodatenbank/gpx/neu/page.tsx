@@ -7,8 +7,8 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { albums } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { albums, fdFotogruppen } from "@/lib/db/schema";
+import { eq, asc } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import GpxUploadForm from "@/components/gpx/GpxUploadForm";
 
@@ -24,6 +24,13 @@ export default async function GpxNeuPage() {
     .where(eq(albums.isActive, true))
     .orderBy(albums.sortOrder, albums.name);
 
+  // Nur aktive Fotogruppen für Dropdown
+  const alleFotogruppen = await db
+    .select({ idfgruppe: fdFotogruppen.idfgruppe, name: fdFotogruppen.name })
+    .from(fdFotogruppen)
+    .where(eq(fdFotogruppen.einaktiv, "ja"))
+    .orderBy(asc(fdFotogruppen.name));
+
   return (
     <div className="p-6 pb-80">
       <div className="flex items-center gap-3 mb-6">
@@ -32,7 +39,7 @@ export default async function GpxNeuPage() {
         </Link>
         <h1 className="text-2xl font-bold text-white">Neuen GPX-Track hochladen</h1>
       </div>
-      <GpxUploadForm alben={alleAlben} />
+      <GpxUploadForm alben={alleAlben} fotogruppen={alleFotogruppen} />
     </div>
   );
 }

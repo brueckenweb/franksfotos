@@ -9,6 +9,7 @@ import { Camera, Film, FolderOpen } from "lucide-react";
 import { auth } from "@/auth";
 import GuestbookPanel from "@/components/GuestbookPanel";
 import WorldMapPanel from "@/components/reisen/WorldMapPanel";
+import PostItPanel from "@/components/postit/PostItPanel";
 
 /** Gibt alle Nachkommen-IDs eines Albums zurück (BFS) */
 function getDescendantIds(albumId: number, childMap: Map<number, number[]>): number[] {
@@ -258,13 +259,21 @@ export default async function HomePage() {
   return (
     <div className="min-h-screen bg-gray-950 text-white">
       {/* Hero */}
-      <section className="py-16 px-4 text-center">
-        <div className="max-w-2xl mx-auto">
-          <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-amber-500/10 border border-amber-500/20 mb-6">
-            <Camera className="w-10 h-10 text-amber-400" />
+      <section className="py-8 px-4">
+        <div className="max-w-4xl mx-auto flex flex-col sm:flex-row items-center justify-center gap-6">
+          {/* Text-Block */}
+          <div className="text-center sm:text-left w-full sm:w-2/3">
+            <div className="inline-flex items-center justify-center w-20 h-20 rounded-full bg-amber-500/10 border border-amber-500/20 mb-6">
+              <Camera className="w-10 h-10 text-amber-400" />
+            </div>
+            <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">FranksFotos</h1>
+            <p className="text-xl text-gray-400">Unsere Reisen mit der Kamera – durch meine Linse – Erinnerungen an Orte und Erlebnisse</p>
           </div>
-          <h1 className="text-4xl md:text-5xl font-bold text-white mb-4">FranksFotos</h1>
-          <p className="text-xl text-gray-400">Unsere Reisen mit der Kamera – durch meine Linse – Erinnerungen an Orte und Erlebnisse</p>
+
+          {/* Post-It Panel (Slot: home) */}
+          <div className="w-full sm:w-1/3">
+            <PostItPanel slot="home" />
+          </div>
         </div>
       </section>
 

@@ -33,7 +33,7 @@ import {
 
 // ─── Typen ────────────────────────────────────────────────────────────────────
 
-type SortCol = "idfgruppe" | "name" | "adatum" | "edatum" | "eingetragen" | "anzahl";
+type SortCol = "idfgruppe" | "name" | "adatum" | "edatum" | "eingetragen" | "anzahl" | "gpxTracks";
 type SortDir = "asc" | "desc";
 
 interface Fotogruppe {
@@ -50,6 +50,7 @@ interface Fotogruppe {
   eingetragen:     string | null;
   anzahl:          number;        // aus DB (Cache für inaktive Gruppen)
   anzahlFotos?:    number;        // lazy nachgeladen (nur aktive Gruppen)
+  anzahlGpxTracks?: number;       // lazy nachgeladen: Anzahl verknüpfter GPX-Tracks
 }
 
 interface FormData {
@@ -103,7 +104,8 @@ export default function FotogruppenListe() {
   const [savingIds,    setSavingIds]    = useState<Set<number>>(new Set());
   const [sortCol,         setSortCol]         = useState<SortCol>("adatum");
   const [sortDir,         setSortDir]         = useState<SortDir>("asc");
-  const [fotozahlenLaden, setFotozahlenLaden] = useState(false);
+  const [fotozahlenLaden,   setFotozahlenLaden]   = useState(false);
+  const [gpxZahlenLaden,    setGpxZahlenLaden]    = useState(false);
 
   // ── Modal-State ───────────────────────────────────────────────────
   const [modalOffen,    setModalOffen]    = useState(false);
@@ -159,8 +161,28 @@ export default function FotogruppenListe() {
     }
   }
 
+  // ── GPX-Track-Anzahlen lazy nachladen ─────────────────────────────
+  async function ladenGpxZahlen() {
+    setGpxZahlenLaden(true);
+    try {
+      const res = await fetch("/api/fotodatenbank/fotogruppen-gpxzahlen");
+      if (!res.ok) return;
+      const map = await res.json() as Record<string, number>;
+      setGruppen((prev) =>
+        prev.map((g) => ({
+          ...g,
+          anzahlGpxTracks: map[String(g.idfgruppe)] ?? 0,
+        }))
+      );
+    } catch {
+      // Fehler ignorieren
+    } finally {
+      setGpxZahlenLaden(false);
+    }
+  }
+
   useEffect(() => {
-    laden().then(() => ladenFotozahlen());
+    laden().then(() => { ladenFotozahlen(); ladenGpxZahlen(); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -187,6 +209,10 @@ export default function FotogruppenListe() {
       // Aktive Gruppen: lazy geladener Wert; inaktive: DB-Wert
       av = a.anzahlFotos ?? a.anzahl;
       bv = b.anzahlFotos ?? b.anzahl;
+    }
+    else if (sortCol === "gpxTracks") {
+      av = a.anzahlGpxTracks ?? 0;
+      bv = b.anzahlGpxTracks ?? 0;
     }
     else { av = (a[sortCol] ?? "") as string; bv = (b[sortCol] ?? "") as string; }
     if (av < bv) return sortDir === "asc" ? -1 : 1;
@@ -506,6 +532,7 @@ export default function FotogruppenListe() {
                   <th className="text-left px-4 py-3 font-medium w-28">Aktiv</th>
                   <SortTh col="eingetragen"  label="Eingetragen" current={sortCol} dir={sortDir} onSort={handleSort} className="w-28" />
                   <SortTh col="anzahl"       label="Fotos"       current={sortCol} dir={sortDir} onSort={handleSort} className="w-20" />
+                  <SortTh col="gpxTracks"    label="GPX-Tracks"  current={sortCol} dir={sortDir} onSort={handleSort} className="w-24" />
                   <th className="text-right px-4 py-3 font-medium w-36">Aktionen</th>
                 </tr>
               </thead>
@@ -604,8 +631,22 @@ export default function FotogruppenListe() {
                           )}
                         </td>
 
+                        {/* GPX-Tracks Anzahl */}
+                        <td className="px-4 py-3">
+                          {gpxZahlenLaden && g.anzahlGpxTracks === undefined ? (
+                            <Loader2 className="w-3 h-3 text-gray-600 animate-spin" />
+                          ) : (g.anzahlGpxTracks ?? 0) > 0 ? (
+                            <span className="inline-flex items-center gap-1 text-green-400 text-xs font-semibold tabular-nums">
+                              <span className="w-1.5 h-1.5 rounded-full bg-green-400 flex-shrink-0" />
+                              {g.anzahlGpxTracks}
+                            </span>
+                          ) : (
+                            <span className="text-gray-600 text-xs">–</span>
+                          )}
+                        </td>
+
                         {/* Aktionen */}
-                        <td className="px-4 py-3 text-right">
+                         <td className="px-4 py-3 text-right">
                           <div className="inline-flex items-center gap-1">
                             <button
                               type="button"
@@ -642,7 +683,7 @@ export default function FotogruppenListe() {
                       {/* Detail-Zeile */}
                       {aufgekl && (
                         <tr className="bg-gray-800/30">
-                          <td colSpan={8} className="px-6 py-4">
+                          <td colSpan={9} className="px-6 py-4">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                               {g.beschreibung && (
                                 <div className="md:col-span-2">

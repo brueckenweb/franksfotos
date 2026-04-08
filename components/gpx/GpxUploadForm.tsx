@@ -4,7 +4,7 @@
  * GpxUploadForm – Formular zum Hochladen eines GPX-Tracks
  * - GPX-Datei auswählen → automatische Analyse (Länge, Höhenmeter, Datum, Land)
  * - Metadaten eingeben
- * - Album verknüpfen
+ * - Album + Fotogruppe verknüpfen
  * - Upload starten
  */
 
@@ -17,12 +17,14 @@ import AlbumTreeSelect from "@/app/admin/alben/AlbumTreeSelect";
 const TYPEN = ["Wanderung", "Autofahrt", "Fahrrad", "Schifffahrt", "Flugzeug"] as const;
 
 interface Album { id: number; name: string; slug: string; parentId: number | null }
+interface Fotogruppe { idfgruppe: number; name: string }
 
 interface GpxUploadFormProps {
   alben: Album[];
+  fotogruppen: Fotogruppe[];
 }
 
-export default function GpxUploadForm({ alben }: GpxUploadFormProps) {
+export default function GpxUploadForm({ alben, fotogruppen }: GpxUploadFormProps) {
   const router = useRouter();
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -35,6 +37,7 @@ export default function GpxUploadForm({ alben }: GpxUploadFormProps) {
   const [hoehmAuf,     setHoehmAuf]     = useState("");
   const [datumTour,    setDatumTour]    = useState("");
   const [albumId,      setAlbumId]      = useState("");
+  const [fotogruppeId, setFotogruppeId] = useState("");
   const [analysiert,   setAnalysiert]   = useState(false);
   const [analyseFehler,setAnalyseFehler]= useState<string | null>(null);
   const [uploading,    setUploading]    = useState(false);
@@ -133,9 +136,10 @@ export default function GpxUploadForm({ alben }: GpxUploadFormProps) {
           typ,
           land: land.trim() || null,
           laengeKm: laengeKm || null,
-          hoehmAuf:  hoehmAuf ? parseInt(hoehmAuf) : null,
+          hoehmAuf:     hoehmAuf     ? parseInt(hoehmAuf)     : null,
           datumTour: datumTour || null,
-          albumId:   albumId  ? parseInt(albumId)   : null,
+          albumId:      albumId      ? parseInt(albumId)      : null,
+          fotogruppeId: fotogruppeId ? parseInt(fotogruppeId) : null,
           gpxDateiname: filename,
           gpxUrl: url,
         }),
@@ -282,6 +286,24 @@ export default function GpxUploadForm({ alben }: GpxUploadFormProps) {
               className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
             />
           </div>
+        </div>
+
+        {/* Fotogruppe */}
+        <div>
+          <label className="block text-sm font-medium text-gray-300 mb-1">Fotogruppe zuordnen</label>
+          <select
+            value={fotogruppeId}
+            onChange={e => setFotogruppeId(e.target.value)}
+            className="w-full bg-gray-800 border border-gray-600 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-blue-500"
+          >
+            <option value="">– keine Fotogruppe –</option>
+            {fotogruppen.map(g => (
+              <option key={g.idfgruppe} value={String(g.idfgruppe)}>{g.name}</option>
+            ))}
+          </select>
+          {fotogruppen.length === 0 && (
+            <p className="text-xs text-gray-500 mt-1">Keine aktiven Fotogruppen vorhanden.</p>
+          )}
         </div>
 
         <div>

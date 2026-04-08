@@ -106,7 +106,63 @@ export async function sendWelcomeEmailToUser(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// 3. Massen-Email an mehrere Empfänger (vom Admin)
+// 3. Passwort-Reset-E-Mail
+// ─────────────────────────────────────────────────────────────────────────────
+export async function sendPasswordResetEmail(
+  userName: string,
+  userEmail: string,
+  resetUrl: string
+) {
+  try {
+    await mailer.sendMail({
+      from: FROM,
+      to: userEmail,
+      subject: "Passwort zurücksetzen – FranksFotos",
+      html: `
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+          <div style="background: #1a1a2e; padding: 24px; border-radius: 8px 8px 0 0;">
+            <h1 style="color: #f59e0b; margin: 0; font-size: 20px;">📸 FranksFotos</h1>
+          </div>
+          <div style="background: #f9fafb; padding: 24px; border-radius: 0 0 8px 8px; border: 1px solid #e5e7eb;">
+            <h2 style="color: #111827; font-size: 20px;">Passwort zurücksetzen</h2>
+            <p style="color: #374151; font-size: 15px; line-height: 1.6;">
+              Hallo ${userName},
+            </p>
+            <p style="color: #374151; font-size: 15px; line-height: 1.6;">
+              du hast das Zurücksetzen deines Passworts bei <strong>FranksFotos</strong> angefordert.
+              Klicke auf den folgenden Button, um ein neues Passwort zu vergeben:
+            </p>
+            <div style="margin: 28px 0; text-align: center;">
+              <a href="${resetUrl}"
+                 style="display: inline-block; background: #f59e0b; color: white; padding: 12px 28px; border-radius: 6px; text-decoration: none; font-weight: bold; font-size: 16px;">
+                Neues Passwort vergeben
+              </a>
+            </div>
+            <p style="color: #6b7280; font-size: 13px; line-height: 1.5;">
+              Dieser Link ist <strong>1 Stunde</strong> gültig. Falls du kein neues Passwort angefordert hast,
+              kannst du diese E-Mail einfach ignorieren – dein Passwort bleibt unverändert.
+            </p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 20px 0;">
+            <p style="color: #9ca3af; font-size: 12px;">
+              Falls der Button nicht funktioniert, kopiere diesen Link in deinen Browser:<br>
+              <a href="${resetUrl}" style="color: #f59e0b; word-break: break-all;">${resetUrl}</a>
+            </p>
+          </div>
+          <p style="color: #9ca3af; font-size: 12px; margin-top: 16px; text-align: center;">
+            FranksFotos · <a href="${process.env.NEXTAUTH_URL || "https://www.frank-sellke.de"}" style="color: #9ca3af;">www.frank-sellke.de</a>
+          </p>
+        </div>
+      `,
+    });
+    console.log(`[Email] Passwort-Reset-Mail gesendet an: ${userEmail}`);
+  } catch (error) {
+    console.error("[Email] Fehler beim Senden der Passwort-Reset-Mail:", error);
+    // Fehler nicht weiterwerfen – API gibt trotzdem Erfolg zurück (Anti-Enumeration)
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// 4. Massen-Email an mehrere Empfänger (vom Admin)
 // ─────────────────────────────────────────────────────────────────────────────
 export interface BroadcastResult {
   sent: number;

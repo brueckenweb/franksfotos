@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { Pencil, Map, Trash2, MapPin, Mountain, Calendar } from "lucide-react";
+import { Pencil, Map, Trash2 } from "lucide-react";
 import { TYP_EMOJI } from "@/lib/gpx/utils";
 import GpxMetaEdit, { type GpxTrackMeta } from "@/components/gpx/GpxMetaEdit";
 
@@ -19,14 +19,21 @@ interface Track {
   albumId: number | null;
   albumName: string | null;
   albumSlug: string | null;
+  fotogruppeId: number | null;
+  fotogruppenName: string | null;
   userName: string | null;
 }
 
 interface Album { id: number; name: string; parentId: number | null }
+interface Fotogruppe { idfgruppe: number; name: string }
 
-interface Props { tracks: Track[]; alben: Album[] }
+interface Props {
+  tracks: Track[];
+  alben: Album[];
+  fotogruppen: Fotogruppe[];
+}
 
-export default function GpxListClient({ tracks: initial, alben }: Props) {
+export default function GpxListClient({ tracks: initial, alben, fotogruppen }: Props) {
   const router = useRouter();
   const [tracks, setTracks] = useState<Track[]>(initial);
   const [editTrack, setEditTrack] = useState<Track | null>(null);
@@ -75,7 +82,8 @@ export default function GpxListClient({ tracks: initial, alben }: Props) {
               <th className="text-right px-4 py-3 hidden sm:table-cell">km</th>
               <th className="text-right px-4 py-3 hidden sm:table-cell">↑ m</th>
               <th className="text-left px-4 py-3 hidden lg:table-cell">Datum</th>
-              <th className="text-left px-4 py-3 hidden lg:table-cell">Album</th>
+              <th className="text-left px-4 py-3 hidden lg:table-cell">Fotogruppe</th>
+              <th className="text-left px-4 py-3 hidden xl:table-cell">Album</th>
               <th className="text-left px-4 py-3 hidden xl:table-cell">Eingetragen</th>
               <th className="px-4 py-3 text-right">Aktionen</th>
             </tr>
@@ -98,7 +106,18 @@ export default function GpxListClient({ tracks: initial, alben }: Props) {
                   {t.hoehmAuf ?? "–"}
                 </td>
                 <td className="px-4 py-3 text-gray-400 hidden lg:table-cell">{formatDatum(t.datumTour)}</td>
+                {/* Fotogruppe */}
                 <td className="px-4 py-3 hidden lg:table-cell">
+                  {t.fotogruppenName ? (
+                    <span className="inline-block bg-amber-900/30 text-amber-400 text-xs px-2 py-0.5 rounded border border-amber-800/50 truncate max-w-[140px]" title={t.fotogruppenName}>
+                      {t.fotogruppenName}
+                    </span>
+                  ) : (
+                    <span className="text-gray-600 text-xs">–</span>
+                  )}
+                </td>
+                {/* Album */}
+                <td className="px-4 py-3 hidden xl:table-cell">
                   {t.albumSlug ? (
                     <Link href={`/alben/${t.albumSlug}`} className="text-blue-400 hover:text-blue-300 text-xs transition-colors">
                       {t.albumName}
@@ -147,12 +166,19 @@ export default function GpxListClient({ tracks: initial, alben }: Props) {
       {editTrack && (
         <GpxMetaEdit
           track={{
-            id: editTrack.id, titel: editTrack.titel,
-            beschreibung: null, typ: editTrack.typ, land: editTrack.land,
-            laengeKm: editTrack.laengeKm, hoehmAuf: editTrack.hoehmAuf,
-            datumTour: editTrack.datumTour, albumId: editTrack.albumId,
+            id:           editTrack.id,
+            titel:        editTrack.titel,
+            beschreibung: null,
+            typ:          editTrack.typ,
+            land:         editTrack.land,
+            laengeKm:     editTrack.laengeKm,
+            hoehmAuf:     editTrack.hoehmAuf,
+            datumTour:    editTrack.datumTour,
+            albumId:      editTrack.albumId,
+            fotogruppeId: editTrack.fotogruppeId,
           }}
           alben={alben}
+          fotogruppen={fotogruppen}
           onClose={() => setEditTrack(null)}
           onSaved={handleSaved}
         />

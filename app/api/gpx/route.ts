@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { fdGpx, albums, users } from "@/lib/db/schema";
+import { fdGpx, fdFotogruppen, albums, users } from "@/lib/db/schema";
 import { eq, desc, like, or, count } from "drizzle-orm";
 
 // ── GET ──────────────────────────────────────────────────────────────
@@ -35,26 +35,29 @@ export async function GET(request: NextRequest) {
     const [rows, totalRows] = await Promise.all([
       db
         .select({
-          id:           fdGpx.id,
-          titel:        fdGpx.titel,
-          beschreibung: fdGpx.beschreibung,
-          typ:          fdGpx.typ,
-          land:         fdGpx.land,
-          laengeKm:     fdGpx.laengeKm,
-          hoehmAuf:     fdGpx.hoehmAuf,
-          datumTour:    fdGpx.datumTour,
-          albumId:      fdGpx.albumId,
-          albumName:    albums.name,
-          albumSlug:    albums.slug,
-          gpxDateiname: fdGpx.gpxDateiname,
-          gpxUrl:       fdGpx.gpxUrl,
-          eingetragen:  fdGpx.eingetragen,
-          userId:       fdGpx.userId,
-          userName:     users.name,
+          id:              fdGpx.id,
+          titel:           fdGpx.titel,
+          beschreibung:    fdGpx.beschreibung,
+          typ:             fdGpx.typ,
+          land:            fdGpx.land,
+          laengeKm:        fdGpx.laengeKm,
+          hoehmAuf:        fdGpx.hoehmAuf,
+          datumTour:       fdGpx.datumTour,
+          albumId:         fdGpx.albumId,
+          albumName:       albums.name,
+          albumSlug:       albums.slug,
+          fotogruppeId:    fdGpx.fotogruppeId,
+          fotogruppenName: fdFotogruppen.name,
+          gpxDateiname:    fdGpx.gpxDateiname,
+          gpxUrl:          fdGpx.gpxUrl,
+          eingetragen:     fdGpx.eingetragen,
+          userId:          fdGpx.userId,
+          userName:        users.name,
         })
         .from(fdGpx)
-        .leftJoin(albums, eq(fdGpx.albumId, albums.id))
-        .leftJoin(users,  eq(fdGpx.userId,  users.id))
+        .leftJoin(albums,        eq(fdGpx.albumId,      albums.id))
+        .leftJoin(users,         eq(fdGpx.userId,       users.id))
+        .leftJoin(fdFotogruppen, eq(fdGpx.fotogruppeId, fdFotogruppen.idfgruppe))
         .where(whereClause)
         .orderBy(desc(fdGpx.eingetragen))
         .limit(limit)
@@ -93,7 +96,7 @@ export async function POST(request: NextRequest) {
     const {
       titel, beschreibung, typ, land,
       laengeKm, hoehmAuf, datumTour,
-      albumId, gpxDateiname, gpxUrl,
+      albumId, fotogruppeId, gpxDateiname, gpxUrl,
     } = body;
 
     if (!titel?.trim()) {
@@ -111,7 +114,8 @@ export async function POST(request: NextRequest) {
       laengeKm:     laengeKm ? String(laengeKm) : null,
       hoehmAuf:     hoehmAuf ? parseInt(String(hoehmAuf), 10) : null,
       datumTour:    datumTour ? new Date(datumTour) : null,
-      albumId:      albumId  ? parseInt(String(albumId),  10) : null,
+      albumId:      albumId      ? parseInt(String(albumId),      10) : null,
+      fotogruppeId: fotogruppeId ? parseInt(String(fotogruppeId), 10) : null,
       gpxDateiname: gpxDateiname ?? "",
       gpxUrl:       gpxUrl.trim(),
       userId,

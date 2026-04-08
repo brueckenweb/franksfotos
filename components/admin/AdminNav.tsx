@@ -22,6 +22,7 @@ import {
   Mail,
   Database,
   BarChart2,
+  StickyNote,
 } from "lucide-react";
 
 interface AdminNavProps {
@@ -72,6 +73,11 @@ const adminOnlyItems = [
     label: "Statistik",
     href: "/admin/statistik",
     icon: BarChart2,
+  },
+  {
+    label: "Post-Its",
+    href: "/admin/postits",
+    icon: StickyNote,
   },
   {
     label: "Fotodatenbank",
