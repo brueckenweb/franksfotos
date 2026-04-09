@@ -397,6 +397,12 @@ export default async function HomePage() {
 
       {/* ── Bereiste Länder / Weltreise (für alle Besucher sichtbar) ─── */}
       <WorldMapPanel isOwner={session?.user?.id === "1"} />
+
+      {/* ── Post-Its unten (home_bottom) – versteckt sich automatisch wenn leer ── */}
+      <PostItPanel
+        slot="home_bottom"
+        className="justify-center max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-12"
+      />
     </div>
   );
 }

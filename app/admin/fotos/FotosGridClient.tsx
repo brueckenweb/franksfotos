@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
@@ -18,6 +18,8 @@ import {
   Loader2,
   CheckCheck,
   Eye,
+  Search,
+  Filter,
 } from "lucide-react";
 import DeletePhotoButton from "./DeletePhotoButton";
 import AlbumTreeSelect, { AlbumOption } from "@/app/admin/alben/AlbumTreeSelect";
@@ -80,6 +82,19 @@ interface Props {
   safePage: number;
   from: number;
   to: number;
+  filterAlbumId: string;
+  searchQuery: string;
+}
+
+/** URL für Fotoliste mit optionalen Filterparametern aufbauen */
+function buildUrl(page: number, album: string, q: string): string {
+  const p = new URLSearchParams();
+  if (page > 1) p.set("page", String(page));
+  if (album) p.set("album", album);
+  const trimmed = q.trim();
+  if (trimmed) p.set("q", trimmed);
+  const qs = p.toString();
+  return `/admin/fotos${qs ? `?${qs}` : ""}`;
 }
 
 export default function FotosGridClient({
@@ -90,6 +105,8 @@ export default function FotosGridClient({
   safePage,
   from,
   to,
+  filterAlbumId,
+  searchQuery,
 }: Props) {
   const router = useRouter();
 
@@ -100,6 +117,38 @@ export default function FotosGridClient({
   // Aktions-State
   const [targetAlbumId, setTargetAlbumId] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Suchfeld (lokaler Zustand für debounced Navigation)
+  const [localSearch, setLocalSearch] = useState(searchQuery);
+  const isFirstRender = useRef(true);
+  // aktuelle Filter-Werte als Refs für den Debounce-Callback
+  const filterAlbumIdRef = useRef(filterAlbumId);
+  const searchQueryRef = useRef(searchQuery);
+
+  useEffect(() => {
+    filterAlbumIdRef.current = filterAlbumId;
+    searchQueryRef.current = searchQuery;
+  }, [filterAlbumId, searchQuery]);
+
+  // Wenn sich searchQuery durch Server-Navigation ändert, lokalSearch synchronisieren
+  useEffect(() => {
+    setLocalSearch(searchQuery);
+  }, [searchQuery]);
+
+  // Debounce: 450 ms nach letzter Eingabe navigieren
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false;
+      return;
+    }
+    const trimmed = localSearch.trim();
+    const timer = setTimeout(() => {
+      if (trimmed !== searchQueryRef.current.trim()) {
+        router.push(buildUrl(1, filterAlbumIdRef.current, trimmed));
+      }
+    }, 450);
+    return () => clearTimeout(timer);
+  }, [localSearch, router]);
 
   /* ------------------------------------------------------------------ */
   /*  Auswahl-Logik                                                        */
@@ -127,6 +176,21 @@ export default function FotosGridClient({
     setSelected(new Set());
     setTargetAlbumId("");
   }
+
+  /* ------------------------------------------------------------------ */
+  /*  Filter-Aktionen                                                      */
+  /* ------------------------------------------------------------------ */
+
+  function handleFilterAlbumChange(newAlbumId: string) {
+    router.push(buildUrl(1, newAlbumId, localSearch));
+  }
+
+  function clearAllFilters() {
+    setLocalSearch("");
+    router.push("/admin/fotos");
+  }
+
+  const hasActiveFilter = !!filterAlbumId || !!searchQuery;
 
   /* ------------------------------------------------------------------ */
   /*  Batch-Aktionen                                                       */
@@ -193,15 +257,27 @@ export default function FotosGridClient({
 
   const allSelected = photos.length > 0 && selected.size === photos.length;
 
+  /** URL zur Foto-Bearbeitungsseite mit Rücksprung-Parametern */
+  function buildEditUrl(photoId: number): string {
+    const p = new URLSearchParams();
+    p.set("page", String(safePage));
+    if (filterAlbumId) p.set("album", filterAlbumId);
+    const trimmed = localSearch.trim();
+    if (trimmed) p.set("q", trimmed);
+    return `/admin/fotos/${photoId}/edit?${p.toString()}`;
+  }
+
   return (
     <>
       {/* ---- Header-Aktionen ---- */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between mb-4">
         <div>
           <h1 className="text-2xl font-bold text-white">Fotos</h1>
           <p className="text-gray-400 text-sm mt-0.5">
             {totalCount > 0
-              ? `${totalCount} Fotos gesamt · Seite ${safePage} von ${totalPages}`
+              ? `${totalCount} Foto${totalCount !== 1 ? "s" : ""} gefunden · Seite ${safePage} von ${totalPages}`
+              : hasActiveFilter
+              ? "Keine Fotos für diesen Filter gefunden"
               : "Noch keine Fotos"}
           </p>
         </div>
@@ -235,6 +311,88 @@ export default function FotosGridClient({
           </Link>
         </div>
       </div>
+
+      {/* ---- Filter-Leiste ---- */}
+      <div className="mb-4 flex flex-col sm:flex-row gap-2 bg-gray-900 border border-gray-800 rounded-xl p-3">
+        {/* Volltextsuche */}
+        <div className="relative flex-1 min-w-0">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500 pointer-events-none" />
+          <input
+            type="text"
+            placeholder="Fotos suchen (Titel, Dateiname) …"
+            value={localSearch}
+            onChange={(e) => setLocalSearch(e.target.value)}
+            className="w-full bg-gray-800 border border-gray-700 hover:border-gray-600 focus:border-amber-500 focus:outline-none rounded-lg pl-9 pr-3 py-2 text-sm text-white placeholder-gray-500 transition-colors"
+          />
+          {localSearch && (
+            <button
+              onClick={() => setLocalSearch("")}
+              className="absolute right-2.5 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 transition-colors"
+              title="Suche löschen"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
+          )}
+        </div>
+
+        {/* Album-Filter */}
+        <div className="flex items-center gap-2 sm:w-72">
+          <Filter className="w-4 h-4 text-gray-500 flex-shrink-0" />
+          <div className="flex-1 min-w-0">
+            <AlbumTreeSelect
+              albums={albums}
+              value={filterAlbumId}
+              onChange={handleFilterAlbumChange}
+              noSelectionLabel="— Alle Alben —"
+            />
+          </div>
+        </div>
+
+        {/* Filter zurücksetzen */}
+        {hasActiveFilter && (
+          <button
+            onClick={clearAllFilters}
+            className="flex items-center gap-1.5 px-3 py-2 text-sm text-gray-400 hover:text-white bg-gray-800 hover:bg-gray-700 border border-gray-700 hover:border-gray-600 rounded-lg transition-colors whitespace-nowrap"
+            title="Alle Filter zurücksetzen"
+          >
+            <X className="w-3.5 h-3.5" />
+            Filter zurücksetzen
+          </button>
+        )}
+      </div>
+
+      {/* Aktiver-Filter-Badge */}
+      {hasActiveFilter && (
+        <div className="mb-3 flex flex-wrap gap-2">
+          {searchQuery && (
+            <span className="inline-flex items-center gap-1.5 bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs rounded-full px-3 py-1">
+              <Search className="w-3 h-3" />
+              Suche: „{searchQuery}"
+              <button
+                onClick={() => {
+                  setLocalSearch("");
+                  router.push(buildUrl(1, filterAlbumId, ""));
+                }}
+                className="hover:text-white transition-colors ml-0.5"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          )}
+          {filterAlbumId && (
+            <span className="inline-flex items-center gap-1.5 bg-blue-500/10 border border-blue-500/30 text-blue-400 text-xs rounded-full px-3 py-1">
+              <Filter className="w-3 h-3" />
+              Album: {albums.find((a) => String(a.id) === filterAlbumId)?.name ?? filterAlbumId}
+              <button
+                onClick={() => router.push(buildUrl(1, "", localSearch))}
+                className="hover:text-white transition-colors ml-0.5"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </span>
+          )}
+        </div>
+      )}
 
       {/* ---- Auswahl-Toolbar ---- */}
       {selectMode && (
@@ -319,14 +477,29 @@ export default function FotosGridClient({
       {photos.length === 0 ? (
         <div className="text-center py-16 bg-gray-900 border border-gray-800 rounded-xl">
           <Camera className="w-12 h-12 text-gray-600 mx-auto mb-3" />
-          <p className="text-gray-400">Noch keine Fotos vorhanden.</p>
-          <Link
-            href="/admin/upload"
-            className="mt-4 inline-flex items-center gap-2 text-amber-400 hover:text-amber-300 text-sm"
-          >
-            <Camera className="w-4 h-4" />
-            Erste Fotos hochladen
-          </Link>
+          {hasActiveFilter ? (
+            <>
+              <p className="text-gray-400">Keine Fotos für den aktuellen Filter gefunden.</p>
+              <button
+                onClick={clearAllFilters}
+                className="mt-4 inline-flex items-center gap-2 text-amber-400 hover:text-amber-300 text-sm"
+              >
+                <X className="w-4 h-4" />
+                Filter zurücksetzen
+              </button>
+            </>
+          ) : (
+            <>
+              <p className="text-gray-400">Noch keine Fotos vorhanden.</p>
+              <Link
+                href="/admin/upload"
+                className="mt-4 inline-flex items-center gap-2 text-amber-400 hover:text-amber-300 text-sm"
+              >
+                <Camera className="w-4 h-4" />
+                Erste Fotos hochladen
+              </Link>
+            </>
+          )}
         </div>
       ) : (
         <>
@@ -393,7 +566,7 @@ export default function FotosGridClient({
                           <Eye className="w-3.5 h-3.5" />
                         </Link>
                         <Link
-                          href={`/admin/fotos/${photo.id}/edit?page=${safePage}`}
+                          href={buildEditUrl(photo.id)}
                           className="bg-white/90 hover:bg-white text-gray-900 rounded-full p-1.5 transition-colors"
                           title="Bearbeiten"
                         >
@@ -447,7 +620,7 @@ export default function FotosGridClient({
               <div className="flex items-center gap-1">
                 {safePage > 2 && (
                   <Link
-                    href="/admin/fotos?page=1"
+                    href={buildUrl(1, filterAlbumId, localSearch)}
                     className="px-3 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
                   >
                     1
@@ -457,7 +630,7 @@ export default function FotosGridClient({
 
                 {safePage > 1 && (
                   <Link
-                    href={`/admin/fotos?page=${safePage - 1}`}
+                    href={buildUrl(safePage - 1, filterAlbumId, localSearch)}
                     className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
                   >
                     <ChevronLeft className="w-4 h-4" />
@@ -471,7 +644,7 @@ export default function FotosGridClient({
 
                 {safePage < totalPages && (
                   <Link
-                    href={`/admin/fotos?page=${safePage + 1}`}
+                    href={buildUrl(safePage + 1, filterAlbumId, localSearch)}
                     className="flex items-center gap-1 px-3 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
                   >
                     {safePage + 1}
@@ -485,7 +658,7 @@ export default function FotosGridClient({
 
                 {safePage < totalPages - 1 && (
                   <Link
-                    href={`/admin/fotos?page=${totalPages}`}
+                    href={buildUrl(totalPages, filterAlbumId, localSearch)}
                     className="px-3 py-1.5 text-sm text-gray-400 hover:text-white hover:bg-gray-800 rounded-lg transition-colors"
                   >
                     {totalPages}
@@ -495,7 +668,7 @@ export default function FotosGridClient({
 
               <div className="flex items-center gap-2">
                 <Link
-                  href={safePage > 1 ? `/admin/fotos?page=${safePage - 1}` : "#"}
+                  href={safePage > 1 ? buildUrl(safePage - 1, filterAlbumId, localSearch) : "#"}
                   className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg transition-colors ${
                     safePage <= 1
                       ? "text-gray-700 cursor-not-allowed"
@@ -507,7 +680,7 @@ export default function FotosGridClient({
                   Zurück
                 </Link>
                 <Link
-                  href={safePage < totalPages ? `/admin/fotos?page=${safePage + 1}` : "#"}
+                  href={safePage < totalPages ? buildUrl(safePage + 1, filterAlbumId, localSearch) : "#"}
                   className={`flex items-center gap-1 px-3 py-1.5 text-sm rounded-lg transition-colors ${
                     safePage >= totalPages
                       ? "text-gray-700 cursor-not-allowed"

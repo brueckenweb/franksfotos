@@ -39,9 +39,14 @@ export default function AlbumTableClient({
   childrenMap,
   isDragEnabled = false,
 }: Props) {
-  const [collapsed, setCollapsed] = useState<Set<number>>(
-    () => new Set(rootAlbums.filter((a) => (childrenMap[a.id]?.length ?? 0) > 0).map((a) => a.id))
-  );
+  // Alle Alben auf allen Ebenen, die Unteralben haben, initial einklappen
+  const [collapsed, setCollapsed] = useState<Set<number>>(() => {
+    const ids = new Set<number>();
+    for (const [id, children] of Object.entries(childrenMap)) {
+      if (children.length > 0) ids.add(Number(id));
+    }
+    return ids;
+  });
   const [localRootAlbums, setLocalRootAlbums] = useState(rootAlbums);
   const [localChildrenMap, setLocalChildrenMap] = useState(childrenMap);
   const [dragId, setDragId] = useState<number | null>(null);

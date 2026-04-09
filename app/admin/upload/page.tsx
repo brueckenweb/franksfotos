@@ -363,7 +363,7 @@ export default function AdminUploadPage() {
       <div className="bg-gray-900 border border-gray-800 rounded-xl p-5 mb-4">
         <h2 className="text-sm font-semibold text-gray-300 mb-4">Upload-Einstellungen</h2>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
+          <div className="sm:col-span-2">
             <label className="block text-sm text-gray-400 mb-1.5">Album</label>
             {/* Einklappbares Baummenü statt flachem select */}
             <AlbumTreeSelect

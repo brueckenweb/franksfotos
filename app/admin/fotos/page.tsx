@@ -2,22 +2,35 @@ import { redirect } from "next/navigation";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { photos, albums } from "@/lib/db/schema";
-import { desc, count } from "drizzle-orm";
-import { eq } from "drizzle-orm";
+import { desc, count, eq, like, or, and } from "drizzle-orm";
 import FotosGridClient from "./FotosGridClient";
 
 const PAGE_SIZE = 60;
 
-async function getPhotoCount(): Promise<number> {
+function buildWhereClause(albumId?: number, query?: string) {
+  const searchCond = query
+    ? or(like(photos.title, `%${query}%`), like(photos.filename, `%${query}%`))
+    : undefined;
+
+  if (albumId !== undefined && searchCond) return and(eq(photos.albumId, albumId), searchCond);
+  if (albumId !== undefined) return eq(photos.albumId, albumId);
+  if (searchCond) return searchCond;
+  return undefined;
+}
+
+async function getPhotoCount(albumId?: number, query?: string): Promise<number> {
   try {
-    const result = await db.select({ total: count() }).from(photos);
+    const result = await db
+      .select({ total: count() })
+      .from(photos)
+      .where(buildWhereClause(albumId, query));
     return result[0]?.total ?? 0;
   } catch {
     return 0;
   }
 }
 
-async function getPhotos(page: number) {
+async function getPhotos(page: number, albumId?: number, query?: string) {
   try {
     return await db
       .select({
@@ -33,6 +46,7 @@ async function getPhotos(page: number) {
       })
       .from(photos)
       .leftJoin(albums, eq(photos.albumId, albums.id))
+      .where(buildWhereClause(albumId, query))
       .orderBy(desc(photos.createdAt))
       .limit(PAGE_SIZE)
       .offset((page - 1) * PAGE_SIZE);
@@ -55,17 +69,22 @@ async function getAllAlbums() {
 export default async function AdminFotosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ page?: string }>;
+  searchParams: Promise<{ page?: string; album?: string; q?: string }>;
 }) {
   const session = await auth();
   if (!session?.user) redirect("/login");
 
   const params = await searchParams;
   const currentPage = Math.max(1, parseInt(params.page ?? "1", 10) || 1);
+  const filterAlbumId = params.album ?? "";
+  const searchQuery = (params.q ?? "").trim();
+
+  const albumId = filterAlbumId ? parseInt(filterAlbumId, 10) : undefined;
+  const query = searchQuery || undefined;
 
   const [totalCount, pagePhotos, allAlbums] = await Promise.all([
-    getPhotoCount(),
-    getPhotos(currentPage),
+    getPhotoCount(albumId, query),
+    getPhotos(currentPage, albumId, query),
     getAllAlbums(),
   ]);
 
@@ -73,7 +92,11 @@ export default async function AdminFotosPage({
   const safePage = Math.min(currentPage, totalPages);
 
   if (currentPage > totalPages && totalCount > 0) {
-    redirect(`/admin/fotos?page=${totalPages}`);
+    const rp = new URLSearchParams();
+    rp.set("page", String(totalPages));
+    if (filterAlbumId) rp.set("album", filterAlbumId);
+    if (searchQuery) rp.set("q", searchQuery);
+    redirect(`/admin/fotos?${rp.toString()}`);
   }
 
   const from = totalCount === 0 ? 0 : (safePage - 1) * PAGE_SIZE + 1;
@@ -89,6 +112,8 @@ export default async function AdminFotosPage({
         safePage={safePage}
         from={from}
         to={to}
+        filterAlbumId={filterAlbumId}
+        searchQuery={searchQuery}
       />
     </div>
   );
