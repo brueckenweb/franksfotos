@@ -8,6 +8,7 @@ import AlbumTreeSelect from "../AlbumTreeSelect";
 import type { AlbumOption } from "../AlbumTreeSelect";
 import TagGroupSelect from "../TagGroupSelect";
 import type { TagOption } from "../TagGroupSelect";
+import PostItTipTapEditor from "@/components/postit/PostItTipTapEditor";
 
 export default function NeuesAlbumPage() {
   const router = useRouter();
@@ -200,12 +201,9 @@ export default function NeuesAlbumPage() {
           <label className="block text-sm font-medium text-gray-300 mb-1.5">
             Beschreibung
           </label>
-          <textarea
-            value={form.description}
-            onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
-            rows={3}
-            placeholder="Optionale Beschreibung..."
-            className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500 placeholder-gray-600 resize-none"
+          <PostItTipTapEditor
+            content={form.description}
+            onChange={(html) => setForm((p) => ({ ...p, description: html }))}
           />
         </div>
 

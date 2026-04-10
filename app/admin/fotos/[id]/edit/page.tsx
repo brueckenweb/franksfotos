@@ -7,6 +7,7 @@ import { ArrowLeft, Save, Loader2, Tag as TagIcon, Users, Lock, ChevronDown } fr
 import PhotoZoom from "@/app/foto/[id]/PhotoZoom";
 import ExifBox from "@/app/foto/[id]/ExifBox";
 import AlbumTreeSelect, { AlbumOption } from "@/app/admin/alben/AlbumTreeSelect";
+import PostItTipTapEditor from "@/components/postit/PostItTipTapEditor";
 
 interface Tag {
   id: number;
@@ -231,11 +232,9 @@ export default function EditFotoPage() {
               <label className="block text-sm font-medium text-gray-300 mb-1.5">
                 Beschreibung
               </label>
-              <textarea
-                value={form.description}
-                onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))}
-                rows={3}
-                className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500 resize-none"
+              <PostItTipTapEditor
+                content={form.description}
+                onChange={(html) => setForm((p) => ({ ...p, description: html }))}
               />
             </div>
 
