@@ -27,6 +27,9 @@ const DEFAULT_CONFIG = {
   zuverarbeitenPath: "C:\\Users\\Frank\\zuverarbeiten",
   fotodatenbankPath: "C:\\FS_Fotodatenbank",
   fotosBasePath:    "F:\\",
+  // Pfad zu ffmpeg.exe – wird für AVI-Transkodierung benötigt.
+  // Nach "winget install Gyan.FFmpeg" liegt ffmpeg hier:
+  ffmpegPath: "C:\\Users\\post\\AppData\\Local\\Microsoft\\WinGet\\Packages\\Gyan.FFmpeg_Microsoft.Winget.Source_8wekyb3d8bbwe\\ffmpeg-8.1-full_build\\bin\\ffmpeg.exe",
 };
 
 let cfg = { ...DEFAULT_CONFIG };
@@ -455,7 +458,9 @@ async function handleDelete(req, res) {
 
 /**
  * GET /thumbnail?bnummer=12345&pfad=1bilder
- * Liefert ein 250px-Thumbnail des Fotos von F:\{pfad}\B{bnummer}.jpg
+ * Liefert ein 250px-Thumbnail:
+ *  - bei JPG: via sharp
+ *  - bei AVI (kein JPG vorhanden): ersten Frame via ffmpeg extrahieren
  */
 async function handleThumbnail(req, res) {
   const url      = new URL(req.url, `http://localhost:${cfg.port}`);
@@ -467,35 +472,90 @@ async function handleThumbnail(req, res) {
     return res.end("bnummer fehlt");
   }
 
-  // Pfad: F:\{pfad}\B{bnummer}.jpg
   const basePath = cfg.fotosBasePath || "F:\\";
-  const jpgPath  = pfad
+
+  // 1. JPG bevorzugen
+  const jpgPath = pfad
     ? path.join(basePath, pfad, `B${bnummer}.jpg`)
     : path.join(basePath, `B${bnummer}.jpg`);
 
-  if (!fs.existsSync(jpgPath)) {
-    res.writeHead(404, { "Content-Type": "text/plain" });
-    return res.end(`Datei nicht gefunden: ${jpgPath}`);
+  if (fs.existsSync(jpgPath)) {
+    try {
+      const { default: sharp } = await import("sharp");
+      const buf = await sharp(jpgPath)
+        .rotate()
+        .resize(250, null, { withoutEnlargement: true })
+        .jpeg({ quality: 75 })
+        .toBuffer();
+
+      res.writeHead(200, {
+        "Content-Type":   "image/jpeg",
+        "Content-Length": buf.length,
+        "Cache-Control":  "public, max-age=3600",
+      });
+      return res.end(buf);
+    } catch (e) {
+      res.writeHead(500, { "Content-Type": "text/plain" });
+      return res.end(`Thumbnail-Fehler: ${e.message}`);
+    }
   }
 
-  try {
-    const { default: sharp } = await import("sharp");
-    const buf = await sharp(jpgPath)
-      .rotate()
-      .resize(250, null, { withoutEnlargement: true })
-      .jpeg({ quality: 75 })
-      .toBuffer();
+  // 2. Kein JPG → nach AVI suchen und ersten Frame extrahieren
+  let aviPath = null;
+  for (const ext of ["avi", "AVI"]) {
+    const p = pfad
+      ? path.join(basePath, pfad, `B${bnummer}.${ext}`)
+      : path.join(basePath, `B${bnummer}.${ext}`);
+    if (fs.existsSync(p)) { aviPath = p; break; }
+  }
 
-    res.writeHead(200, {
-      "Content-Type":  "image/jpeg",
-      "Content-Length": buf.length,
-      "Cache-Control":  "public, max-age=3600",
+  if (aviPath) {
+    const { spawn } = await import("node:child_process");
+    const ffmpegBin = cfg.ffmpegPath || "ffmpeg";
+
+    // ffmpeg: ersten Frame als JPEG in stdout
+    const ffmpeg = spawn(ffmpegBin, [
+      "-i",        aviPath,
+      "-vframes",  "1",           // nur 1 Frame
+      "-vf",       "scale=250:-1", // auf 250px Breite skalieren
+      "-f",        "image2",
+      "-vcodec",   "mjpeg",
+      "pipe:1",
+    ], { windowsHide: true });
+
+    const chunks = [];
+    ffmpeg.stdout.on("data", (d) => chunks.push(d));
+
+    ffmpeg.on("error", (err) => {
+      console.error("❌ ffmpeg-Thumbnail-Fehler:", err.message);
+      if (!res.headersSent) {
+        res.writeHead(500, { "Content-Type": "text/plain" });
+        res.end("ffmpeg nicht gefunden oder Fehler: " + err.message);
+      }
     });
-    res.end(buf);
-  } catch (e) {
-    res.writeHead(500, { "Content-Type": "text/plain" });
-    res.end(`Thumbnail-Fehler: ${e.message}`);
+
+    ffmpeg.on("close", (code) => {
+      if (res.headersSent) return;
+      if (code === 0 && chunks.length > 0) {
+        const buf = Buffer.concat(chunks);
+        res.writeHead(200, {
+          "Content-Type":   "image/jpeg",
+          "Content-Length": buf.length,
+          "Cache-Control":  "public, max-age=3600",
+        });
+        res.end(buf);
+      } else {
+        res.writeHead(500, { "Content-Type": "text/plain" });
+        res.end(`ffmpeg Thumbnail fehlgeschlagen (code ${code})`);
+      }
+    });
+
+    return;
   }
+
+  // 3. Nichts gefunden
+  res.writeHead(404, { "Content-Type": "text/plain" });
+  res.end(`Datei nicht gefunden: B${bnummer}.jpg / .avi`);
 }
 
 /**
@@ -558,6 +618,127 @@ async function handleFiles(req, res) {
     });
   } catch (e) {
     sendJson(res, 500, { error: `Fehler beim Lesen: ${e.message}` });
+  }
+}
+
+/**
+ * GET /video?bnummer=12345&pfad=1bilder
+ * Streamt das Video B{bnummer}.mp4 / .mov / .avi von F:\{pfad}\
+ * AVI-Dateien werden via ffmpeg on-the-fly in MP4 transkodiert.
+ * Unterstützt Range-Requests für .mp4/.mov (AVI: kein Range wegen Live-Transkodierung)
+ */
+async function handleVideo(req, res) {
+  const url      = new URL(req.url, `http://localhost:${cfg.port}`);
+  const bnummer  = url.searchParams.get("bnummer");
+  const pfad     = url.searchParams.get("pfad") || "";
+
+  if (!bnummer) {
+    res.writeHead(400, { "Content-Type": "text/plain" });
+    return res.end("bnummer fehlt");
+  }
+
+  const basePath = cfg.fotosBasePath || "F:\\";
+
+  // Suche nach mp4, mov oder avi (Groß-/Kleinschreibung)
+  let videoPath = null;
+  let mimeType  = "video/mp4";
+  let isAvi     = false;
+  for (const [ext, mime, avi] of [
+    ["mp4","video/mp4",       false],
+    ["mov","video/quicktime", false],
+    ["avi","video/mp4",       true],   // AVI → wird zu MP4 transkodiert
+    ["MP4","video/mp4",       false],
+    ["MOV","video/quicktime", false],
+    ["AVI","video/mp4",       true],
+  ]) {
+    const p = pfad
+      ? path.join(basePath, pfad, `B${bnummer}.${ext}`)
+      : path.join(basePath, `B${bnummer}.${ext}`);
+    if (fs.existsSync(p)) {
+      videoPath = p;
+      mimeType  = mime;
+      isAvi     = avi;
+      break;
+    }
+  }
+
+  if (!videoPath) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    return res.end("Kein Video gefunden");
+  }
+
+  // AVI → on-the-fly Transkodierung mit ffmpeg
+  if (isAvi) {
+    const { spawn } = await import("node:child_process");
+    const ffmpegBin = cfg.ffmpegPath || "ffmpeg";
+    res.writeHead(200, {
+      "Content-Type":  "video/mp4",
+      "Cache-Control": "no-store",
+    });
+
+    // ffmpeg: AVI → MP4 (H.264, AAC) in Pipe
+    const ffmpeg = spawn(ffmpegBin, [
+      "-i",       videoPath,
+      "-c:v",     "libx264",
+      "-preset",  "veryfast",
+      "-crf",     "28",
+      "-c:a",     "aac",
+      "-movflags", "frag_keyframe+empty_moov+faststart",
+      "-f",       "mp4",
+      "pipe:1",
+    ], { windowsHide: true });
+
+    ffmpeg.stderr.on("data", (d) => {
+      // ffmpeg schreibt Fortschritt auf stderr – ignorieren (nur bei Fehler loggen)
+    });
+
+    ffmpeg.on("error", (err) => {
+      if (err.code === "ENOENT") {
+        console.error("❌ ffmpeg nicht gefunden – bitte installieren (https://ffmpeg.org)");
+      } else {
+        console.error("❌ ffmpeg-Fehler:", err.message);
+      }
+      if (!res.headersSent) {
+        res.writeHead(500, { "Content-Type": "text/plain" });
+      }
+      res.end("ffmpeg-Fehler: " + err.message);
+    });
+
+    ffmpeg.stdout.pipe(res);
+
+    req.on("close", () => {
+      try { ffmpeg.kill(); } catch { /* ignore */ }
+    });
+
+    return;
+  }
+
+  // MP4 / MOV: direkt streamen (mit Range-Support)
+  const stat     = fs.statSync(videoPath);
+  const fileSize = stat.size;
+  const range    = req.headers["range"];
+
+  if (range) {
+    // Partial content (Range-Request) – wichtig für Browser-Video-Player
+    const parts = range.replace(/bytes=/, "").split("-");
+    const start = parseInt(parts[0], 10);
+    const end   = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunk = end - start + 1;
+
+    res.writeHead(206, {
+      "Content-Range":  `bytes ${start}-${end}/${fileSize}`,
+      "Accept-Ranges":  "bytes",
+      "Content-Length": chunk,
+      "Content-Type":   mimeType,
+    });
+    fs.createReadStream(videoPath, { start, end }).pipe(res);
+  } else {
+    res.writeHead(200, {
+      "Content-Length": fileSize,
+      "Content-Type":   mimeType,
+      "Accept-Ranges":  "bytes",
+    });
+    fs.createReadStream(videoPath).pipe(res);
   }
 }
 
@@ -626,6 +807,7 @@ const server = http.createServer(async (req, res) => {
     if (route === "/process"          && req.method === "POST") return await handleProcess(req, res);
     if (route === "/delete"           && req.method === "POST") return await handleDelete(req, res);
     if (route === "/thumbnail"        && req.method === "GET")  return await handleThumbnail(req, res);
+    if (route === "/video"            && req.method === "GET")  return await handleVideo(req, res);
     if (route === "/files"            && req.method === "GET")  return await handleFiles(req, res);
     if (route === "/prepare-galerie"  && req.method === "POST") return await handlePrepareGalerie(req, res);
 

@@ -16,7 +16,7 @@ import {
   Search, RefreshCw, Loader2, AlertCircle, ChevronLeft, ChevronRight,
   Pencil, Trash2, Image as ImageIcon, FolderOpen, Upload, X, Save,
   CheckCircle2, ChevronUp, ChevronDown, ChevronsUpDown, Wifi, WifiOff,
-  Camera, Lock, Users, Tag,
+  Camera, Lock, Users, Tag, Film,
 } from "lucide-react";
 
 // ─── Typen ────────────────────────────────────────────────────────────────────
@@ -328,6 +328,10 @@ export default function FotodatenbankBrowser() {
     return `${LOCAL_SERVER}/thumbnail?bnummer=${e.bnummer}&pfad=${encodeURIComponent(e.pfad)}`;
   }
 
+  function videoUrl(e: FdEintrag) {
+    return `${LOCAL_SERVER}/video?bnummer=${e.bnummer}&pfad=${encodeURIComponent(e.pfad)}`;
+  }
+
   function formatDatum(raw: string | null | undefined): string {
     if (!raw) return "–";
     const m = String(raw).match(/^(\d{4})-(\d{2})-(\d{2})/);
@@ -436,14 +440,13 @@ export default function FotodatenbankBrowser() {
                 {rows.map((e) => (
                   <tr key={e.bnummer} className="hover:bg-gray-800/30 transition-colors">
 
-                    {/* Thumbnail */}
+                    {/* Thumbnail / Video */}
                     <td className="px-3 py-2">
                       {localOk ? (
-                        <img
-                          src={thumbnailUrl(e)}
+                        <ThumbnailCell
+                          thumbSrc={thumbnailUrl(e)}
+                          videoSrc={videoUrl(e)}
                           alt={`B${e.bnummer}`}
-                          className="w-12 h-10 object-cover rounded bg-gray-800"
-                          onError={(ev) => { (ev.target as HTMLImageElement).style.display = "none"; }}
                         />
                       ) : (
                         <div className="w-12 h-10 rounded bg-gray-800 flex items-center justify-center">
@@ -586,11 +589,14 @@ export default function FotodatenbankBrowser() {
             {editError   && <div className="flex items-start gap-2 bg-red-900/20 border border-red-800 rounded-lg px-4 py-3 text-red-400 text-sm"><AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" /><span>{editError}</span></div>}
             {editSuccess && <div className="bg-green-900/20 border border-green-800 rounded-lg px-4 py-3 text-green-400 text-sm flex items-center gap-2"><CheckCircle2 className="w-4 h-4" />{editSuccess}</div>}
 
-            {/* Thumbnail */}
+            {/* Vorschau: Foto oder Video mit Filmstreifen */}
             {localOk && (
               <div className="flex gap-4 items-start">
-                <img src={thumbnailUrl(editEntry)} alt="" className="w-32 h-28 object-cover rounded-lg bg-gray-800 flex-shrink-0"
-                  onError={(ev) => { (ev.target as HTMLImageElement).style.display = "none"; }} />
+                <MediaPreview
+                  thumbSrc={thumbnailUrl(editEntry)}
+                  videoSrc={videoUrl(editEntry)}
+                  className="w-32 h-28 flex-shrink-0"
+                />
                 <div className="text-xs text-gray-500 leading-relaxed pt-1">
                   <div className="text-gray-400 font-medium mb-1">B{editEntry.bnummer}</div>
                   {editEntry.kamera && <div>📷 {editEntry.kamera}</div>}
@@ -716,10 +722,13 @@ export default function FotodatenbankBrowser() {
           </div>
 
           <div className="p-6">
-            {/* Thumbnail groß */}
+            {/* Vorschau groß: Foto oder Video */}
             <div className="mb-4 flex justify-center">
-              <img src={thumbnailUrl(dateienEntry)} alt="" className="max-h-48 rounded-lg bg-gray-800 object-contain"
-                onError={(ev) => { (ev.target as HTMLImageElement).style.display = "none"; }} />
+              <MediaPreview
+                thumbSrc={`${LOCAL_SERVER}/thumbnail?bnummer=${dateienEntry.bnummer}&pfad=${encodeURIComponent(dateienEntry.pfad)}`}
+                videoSrc={`${LOCAL_SERVER}/video?bnummer=${dateienEntry.bnummer}&pfad=${encodeURIComponent(dateienEntry.pfad)}`}
+                className="max-h-48 max-w-full"
+              />
             </div>
 
             {dateienLoad ? (
@@ -918,6 +927,129 @@ function FRow({ label, children, className = "" }: { label: React.ReactNode; chi
     <div className={`flex flex-col gap-1.5 ${className}`}>
       <label className="text-gray-400 text-xs font-medium">{label}</label>
       {children}
+    </div>
+  );
+}
+
+// ─── Filmstreifen-Überlagerung ────────────────────────────────────────────────
+// Wird über ein Video gelegt und simuliert Filmperforierungen links + rechts.
+
+function FilmstripOverlay({ holes = 3 }: { holes?: number }) {
+  const holeArr = Array.from({ length: holes });
+  const track = (
+    <div className="absolute inset-y-0 flex flex-col justify-around items-center py-0.5 w-[7px] bg-gray-950 z-10">
+      {holeArr.map((_, i) => (
+        <div key={i} className="w-[5px] h-[5px] rounded-sm bg-white/50" />
+      ))}
+    </div>
+  );
+  return (
+    <>
+      {/* Linker Filmstreifen-Track */}
+      <div className="absolute inset-y-0 left-0" style={{ width: 7 }}>
+        {track}
+      </div>
+      {/* Rechter Filmstreifen-Track */}
+      <div className="absolute inset-y-0 right-0" style={{ width: 7 }}>
+        {track}
+      </div>
+    </>
+  );
+}
+
+// ─── ThumbnailCell ─────────────────────────────────────────────────────────────
+// Kleine Zelle in der Tabelle (48×40 px).
+// Versucht ein Video zu laden; wenn vorhanden → Filmstreifen + Autoplay.
+// Bei Fehler (kein Video) → reguläres Thumbnail-Bild.
+
+function ThumbnailCell({ thumbSrc, videoSrc, alt }: { thumbSrc: string; videoSrc: string; alt: string }) {
+  const [videoOk, setVideoOk] = useState<boolean | null>(null);
+
+  return (
+    <div className="relative w-12 h-10 rounded overflow-hidden bg-gray-800 flex-shrink-0">
+      {/* Video-Element – immer im DOM, aber nur sichtbar wenn vorhanden */}
+      <video
+        src={videoSrc}
+        preload="metadata"
+        autoPlay
+        muted
+        loop
+        playsInline
+        onLoadedMetadata={() => setVideoOk(true)}
+        onError={() => setVideoOk(false)}
+        className="absolute inset-0 w-full h-full object-cover"
+        style={{ display: videoOk === true ? "block" : "none" }}
+      />
+
+      {/* Filmstreifen-Overlay (nur bei Video) */}
+      {videoOk === true && (
+        <>
+          <FilmstripOverlay holes={2} />
+          {/* Film-Icon-Badge */}
+          <div className="absolute bottom-0.5 right-[9px] z-20 pointer-events-none">
+            <Film className="w-2.5 h-2.5 text-amber-400 drop-shadow" />
+          </div>
+        </>
+      )}
+
+      {/* Fallback-Bild (während des Ladens oder wenn kein Video) */}
+      {videoOk !== true && (
+        <img
+          src={thumbSrc}
+          alt={alt}
+          className="absolute inset-0 w-full h-full object-cover"
+          onError={(ev) => { (ev.target as HTMLImageElement).style.display = "none"; }}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── MediaPreview ──────────────────────────────────────────────────────────────
+// Größere Vorschau für Modals.
+// Versucht Video zu laden; wenn vorhanden → Filmstreifen-Rahmen + Autoplay.
+// Bei Fehler → reguläres Bild.
+
+function MediaPreview({ thumbSrc, videoSrc, className = "" }: { thumbSrc: string; videoSrc: string; className?: string }) {
+  const [videoOk, setVideoOk] = useState<boolean | null>(null);
+
+  return (
+    <div className={`relative rounded-lg overflow-hidden bg-gray-800 ${className}`}>
+      {/* Video */}
+      <video
+        src={videoSrc}
+        preload="metadata"
+        autoPlay
+        muted
+        loop
+        playsInline
+        onLoadedMetadata={() => setVideoOk(true)}
+        onError={() => setVideoOk(false)}
+        className="w-full h-full object-cover"
+        style={{ display: videoOk === true ? "block" : "none" }}
+      />
+
+      {/* Filmstreifen + Label (nur bei Video) */}
+      {videoOk === true && (
+        <>
+          <FilmstripOverlay holes={4} />
+          {/* "Video"-Badge unten rechts */}
+          <div className="absolute bottom-1.5 right-2.5 z-20 flex items-center gap-1 bg-black/60 rounded px-1.5 py-0.5 pointer-events-none">
+            <Film className="w-3 h-3 text-amber-400" />
+            <span className="text-amber-400 text-[10px] font-semibold tracking-wide">VIDEO</span>
+          </div>
+        </>
+      )}
+
+      {/* Fallback-Bild */}
+      {videoOk !== true && (
+        <img
+          src={thumbSrc}
+          alt=""
+          className="w-full h-full object-cover"
+          onError={(ev) => { (ev.target as HTMLImageElement).style.display = "none"; }}
+        />
+      )}
     </div>
   );
 }
