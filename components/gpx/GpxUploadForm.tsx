@@ -10,9 +10,24 @@
 
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Upload, MapPin, Mountain, Calendar, Info } from "lucide-react";
-import { parseGpxText, TYP_EMOJI } from "@/lib/gpx/utils";
+import dynamic from "next/dynamic";
+import { Upload, MapPin, Mountain, Calendar, Info, Map } from "lucide-react";
+import { parseGpxText, TYP_EMOJI, type GpxPoint } from "@/lib/gpx/utils";
 import AlbumTreeSelect from "@/app/admin/alben/AlbumTreeSelect";
+
+// Leaflet-Karte nur client-seitig laden (kein SSR)
+const GpxPreviewMap = dynamic(
+  () => import("@/components/gpx/GpxPreviewMap"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex items-center justify-center bg-gray-800 rounded-xl border border-gray-700 text-gray-400 text-sm" style={{ height: "300px" }}>
+        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-400 mr-2" />
+        Karte wird geladen…
+      </div>
+    ),
+  }
+);
 
 const TYPEN = ["Wanderung", "Autofahrt", "Fahrrad", "Schifffahrt", "Flugzeug"] as const;
 
@@ -43,12 +58,14 @@ export default function GpxUploadForm({ alben, fotogruppen }: GpxUploadFormProps
   const [uploading,    setUploading]    = useState(false);
   const [fehler,       setFehler]       = useState<string | null>(null);
   const [geoLaden,     setGeoLaden]     = useState(false);
+  const [vorschauPunkte, setVorschauPunkte] = useState<GpxPoint[]>([]);
 
   // GPX-Datei auswählen → automatisch analysieren
   const onDateiAuswaehlen = useCallback(async (file: File) => {
     setDatei(file);
     setAnalysiert(false);
     setAnalyseFehler(null);
+    setVorschauPunkte([]);
 
     // Dateiname als Titel-Vorschlag
     if (!titel) {
@@ -65,6 +82,7 @@ export default function GpxUploadForm({ alben, fotogruppen }: GpxUploadFormProps
         return;
       }
 
+      setVorschauPunkte(stats.punkte);
       setLaengeKm(stats.laengeKm);
       setHoehmAuf(String(stats.hoehmAuf));
       if (stats.datumTour) {
@@ -210,6 +228,17 @@ export default function GpxUploadForm({ alben, fotogruppen }: GpxUploadFormProps
       {analyseFehler && (
         <div className="bg-red-900/30 border border-red-700 rounded-lg p-3 text-sm text-red-300">
           {analyseFehler}
+        </div>
+      )}
+
+      {/* Kartenvorschau */}
+      {vorschauPunkte.length > 0 && (
+        <div>
+          <h3 className="text-sm font-medium text-gray-300 mb-2 flex items-center gap-2">
+            <Map className="w-4 h-4 text-blue-400" />
+            Vorschau des Tracks
+          </h3>
+          <GpxPreviewMap punkte={vorschauPunkte} typ={typ} hoehe="300px" />
         </div>
       )}
 

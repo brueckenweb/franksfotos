@@ -17,6 +17,11 @@ type Props = {
   searchParams: Promise<{ from?: string }>;
 };
 
+/** Entfernt HTML-Tags aus einem String (für Plaintext-Kontexte) */
+function stripHtml(html: string): string {
+  return html.replace(/<[^>]*>/g, "");
+}
+
 async function getPhoto(id: number) {
   try {
     const result = await db
@@ -336,7 +341,7 @@ export default async function FotoPage({ params, searchParams }: Props) {
               )
             )}
             <span className="text-white text-sm truncate font-medium">
-              {photo.description || photo.title || photo.filename}
+              {photo.title || photo.filename}
             </span>
             {photo.isPrivate && (
               <Lock className="w-4 h-4 text-amber-400 flex-shrink-0" />
@@ -401,15 +406,14 @@ export default async function FotoPage({ params, searchParams }: Props) {
           <div className="space-y-4">
             {/* Foto-Info */}
             <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
-              {/* Beschreibung (groß) */}
-              {photo.description ? (
-                <h1 className="text-xl font-bold text-white mb-1 leading-snug">
-                  {photo.description}
-                </h1>
-              ) : (
-                <h1 className="text-xl font-bold text-white mb-1">
-                  {photo.title || photo.filename}
-                </h1>
+              {/* Titel (groß) */}
+              <h1 className="text-xl font-bold text-white mb-1 leading-snug">
+                {photo.title || photo.filename}
+              </h1>
+
+              {/* Beschreibung */}
+              {photo.description && (
+                <p className="text-sm text-gray-300 mb-2 leading-relaxed" dangerouslySetInnerHTML={{ __html: photo.description }} />
               )}
 
               {/* Dateiname (klein) */}

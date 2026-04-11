@@ -658,7 +658,7 @@ export default async function AlbumPage({ params }: Props) {
 
         {/* Album-Beschreibung */}
         {album.description && (
-          <p className="text-gray-400 mb-8">{album.description}</p>
+          <p className="text-gray-400 mb-8" dangerouslySetInnerHTML={{ __html: album.description }} />
         )}
 
         {/* ── Unteralben-Grid ─────────────────────────────────────── */}
@@ -713,7 +713,7 @@ export default async function AlbumPage({ params }: Props) {
                       {child.name}
                     </h3>
                     {child.description && (
-                      <p className="text-xs text-gray-500 truncate mt-0.5">{child.description}</p>
+                      <p className="text-xs text-gray-500 truncate mt-0.5" dangerouslySetInnerHTML={{ __html: child.description }} />
                     )}
                     <p className="text-xs text-gray-600 mt-0.5">
                       {child.childCount > 0
