@@ -1,12 +1,10 @@
 import { promises as fs } from "fs";
 import path from "path";
-import { createGzip } from "zlib";
-import { pipeline } from "stream";
-import { promisify as streamPromisify } from "util";
 import { db } from "@/lib/db";
 import { sql } from "drizzle-orm";
 
-const pipelineAsync = streamPromisify(pipeline);
+// Chunk-Größe für SELECT-Abfragen (Zeilen pro Abfrage)
+const ROW_CHUNK_SIZE = 500;
 
 interface BackupInfo {
   id: string;
@@ -94,29 +92,57 @@ export class BackupManager {
     }
   }
 
-  private async createSQLDump(outputPath: string): Promise<void> {
-    console.log("🔄 Starte Drizzle-basiertes Backup (KEIN mysqldump!)");
+  /** Hilfsmethode: String inkrementell an Datei anhängen */
+  private async appendToFile(filePath: string, content: string): Promise<void> {
+    await fs.appendFile(filePath, content, "utf8");
+  }
+
+  /** Escape-Funktion für SQL-Werte */
+  private escapeValue(value: unknown): string {
+    if (value === null || value === undefined) return "NULL";
+    if (typeof value === "string") {
+      const escaped = value
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'")
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, "\\n")
+        .replace(/\r/g, "\\r")
+        .replace(/\t/g, "\\t")
+        .replace(/\0/g, "\\0");
+      return `'${escaped}'`;
+    }
+    if (value instanceof Date)
+      return `'${value.toISOString().slice(0, 19).replace("T", " ")}'`;
+    if (typeof value === "boolean") return value ? "1" : "0";
+    if (typeof value === "number") return value.toString();
+    if (Buffer.isBuffer(value)) return `'${value.toString("hex")}'`;
+    return `'${String(value)}'`;
+  }
+
+  private async createSQLDump(outputPath: string, onProgress?: (table: string, rows: number) => Promise<void>): Promise<void> {
+    console.log("🔄 Starte Drizzle-basiertes Backup (Chunked-Modus)");
 
     const dbConfig = await this.getDatabaseConfig();
 
-    let sqlContent = "";
+    // Datei zunächst leeren / neu anlegen
+    await fs.writeFile(outputPath, "", "utf8");
 
     // Header
-    sqlContent += `-- MySQL dump created by FranksFotos Backup Manager (Pure Drizzle Implementation)\n`;
-    sqlContent += `-- Host: ${dbConfig.host}    Database: ${dbConfig.database}\n`;
-    sqlContent += `-- ------------------------------------------------------\n`;
-    sqlContent += `-- Server version\t${new Date().toISOString()}\n\n`;
-
-    sqlContent += `/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;\n`;
-    sqlContent += `/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;\n`;
-    sqlContent += `/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;\n`;
-    sqlContent += `/*!40101 SET NAMES utf8mb4 */;\n`;
-    sqlContent += `/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;\n`;
-    sqlContent += `/*!40103 SET TIME_ZONE='+00:00' */;\n`;
-    sqlContent += `/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;\n`;
-    sqlContent += `/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;\n`;
-    sqlContent += `/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;\n`;
-    sqlContent += `/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;\n\n`;
+    let header = `-- MySQL dump created by FranksFotos Backup Manager (Chunked Drizzle)\n`;
+    header += `-- Host: ${dbConfig.host}    Database: ${dbConfig.database}\n`;
+    header += `-- ------------------------------------------------------\n`;
+    header += `-- Server version\t${new Date().toISOString()}\n\n`;
+    header += `/*!40101 SET @OLD_CHARACTER_SET_CLIENT=@@CHARACTER_SET_CLIENT */;\n`;
+    header += `/*!40101 SET @OLD_CHARACTER_SET_RESULTS=@@CHARACTER_SET_RESULTS */;\n`;
+    header += `/*!40101 SET @OLD_COLLATION_CONNECTION=@@COLLATION_CONNECTION */;\n`;
+    header += `/*!40101 SET NAMES utf8mb4 */;\n`;
+    header += `/*!40103 SET @OLD_TIME_ZONE=@@TIME_ZONE */;\n`;
+    header += `/*!40103 SET TIME_ZONE='+00:00' */;\n`;
+    header += `/*!40014 SET @OLD_UNIQUE_CHECKS=@@UNIQUE_CHECKS, UNIQUE_CHECKS=0 */;\n`;
+    header += `/*!40014 SET @OLD_FOREIGN_KEY_CHECKS=@@FOREIGN_KEY_CHECKS, FOREIGN_KEY_CHECKS=0 */;\n`;
+    header += `/*!40101 SET @OLD_SQL_MODE=@@SQL_MODE, SQL_MODE='NO_AUTO_VALUE_ON_ZERO' */;\n`;
+    header += `/*!40111 SET @OLD_SQL_NOTES=@@SQL_NOTES, SQL_NOTES=0 */;\n\n`;
+    await this.appendToFile(outputPath, header);
 
     try {
       console.log("📋 Lade Tabellenliste...");
@@ -187,9 +213,7 @@ export class BackupManager {
         );
       }
 
-      console.log(
-        `📋 ${foundTableNames.length} Tabellen werden exportiert`
-      );
+      console.log(`📋 ${foundTableNames.length} Tabellen werden exportiert`);
 
       let processedTables = 0;
       for (const tableName of foundTableNames) {
@@ -200,11 +224,11 @@ export class BackupManager {
           continue;
         }
 
+        // Status pro Tabelle aktualisieren (hält den Timeout-Wächter bei Laune)
         await this.saveStatus({
           isRunning: true,
-          progress:
-            30 + (processedTables / foundTableNames.length) * 60,
-          currentTable: `Exportiere Tabelle: ${tableName}`,
+          progress: 30 + (processedTables / foundTableNames.length) * 60,
+          currentTable: `Exportiere: ${tableName}…`,
         });
 
         try {
@@ -241,106 +265,116 @@ export class BackupManager {
             continue;
           }
 
-          sqlContent += `--\n-- Table structure for table \`${tableName}\`\n--\n\n`;
-          sqlContent += `DROP TABLE IF EXISTS \`${tableName}\`;\n`;
-          sqlContent += `/*!40101 SET @saved_cs_client     = @@character_set_client */;\n`;
-          sqlContent += `/*!40101 SET character_set_client = utf8 */;\n`;
-          sqlContent += `${createStatement};\n`;
-          sqlContent += `/*!40101 SET character_set_client = @saved_cs_client */;\n\n`;
+          let tableHeader = `--\n-- Table structure for table \`${tableName}\`\n--\n\n`;
+          tableHeader += `DROP TABLE IF EXISTS \`${tableName}\`;\n`;
+          tableHeader += `/*!40101 SET @saved_cs_client     = @@character_set_client */;\n`;
+          tableHeader += `/*!40101 SET character_set_client = utf8 */;\n`;
+          tableHeader += `${createStatement};\n`;
+          tableHeader += `/*!40101 SET character_set_client = @saved_cs_client */;\n\n`;
+          await this.appendToFile(outputPath, tableHeader);
 
-          // Daten exportieren
-          const rows = await db.execute(
-            sql.raw(`SELECT * FROM \`${tableName}\``)
-          );
+          // ── Daten CHUNK-weise exportieren (kein SELECT * ohne LIMIT!) ──
+          let offset = 0;
+          let totalRows = 0;
+          let columns: string[] | null = null;
+          let headerWritten = false;
 
-          let dataRows: any[] = [];
-          if (Array.isArray(rows) && rows.length > 0) {
-            if (Array.isArray(rows[0]) && rows[0].length > 0) {
-              dataRows = rows[0];
-            } else {
-              dataRows = rows as any[];
-            }
-          }
+          while (true) {
+            // Status für jeden Chunk aktualisieren – verhindert Timeout
+            await this.saveStatus({
+              isRunning: true,
+              progress: 30 + (processedTables / foundTableNames.length) * 60,
+              currentTable: `${tableName} (${totalRows} Zeilen exportiert…)`,
+            });
 
-          console.log(
-            `📊 Tabelle ${tableName}: ${dataRows.length} Zeilen gefunden`
-          );
+            const rows = await db.execute(
+              sql.raw(`SELECT * FROM \`${tableName}\` LIMIT ${ROW_CHUNK_SIZE} OFFSET ${offset}`)
+            );
 
-          if (dataRows.length > 0) {
-            sqlContent += `--\n-- Dumping data for table \`${tableName}\`\n--\n\n`;
-            sqlContent += `LOCK TABLES \`${tableName}\` WRITE;\n`;
-            sqlContent += `/*!40000 ALTER TABLE \`${tableName}\` DISABLE KEYS */;\n`;
-
-            const batchSize = 100;
-            for (let i = 0; i < dataRows.length; i += batchSize) {
-              const batch = dataRows.slice(i, i + batchSize);
-              const values = batch.map((row) => {
-                const rowValues = Object.values(row).map((value) => {
-                  if (value === null || value === undefined) return "NULL";
-                  if (typeof value === "string") {
-                    const escaped = value
-                      .replace(/\\/g, "\\\\")
-                      .replace(/'/g, "\\'")
-                      .replace(/"/g, '\\"')
-                      .replace(/\n/g, "\\n")
-                      .replace(/\r/g, "\\r")
-                      .replace(/\t/g, "\\t")
-                      .replace(/\0/g, "\\0");
-                    return `'${escaped}'`;
-                  }
-                  if (value instanceof Date)
-                    return `'${value
-                      .toISOString()
-                      .slice(0, 19)
-                      .replace("T", " ")}'`;
-                  if (typeof value === "boolean")
-                    return value ? "1" : "0";
-                  if (typeof value === "number")
-                    return value.toString();
-                  if (Buffer.isBuffer(value))
-                    return `'${value.toString("hex")}'`;
-                  return `'${String(value)}'`;
-                });
-                return `(${rowValues.join(",")})`;
-              });
-
-              if (values.length > 0) {
-                const columns = Object.keys(dataRows[0])
-                  .map((col) => `\`${col}\``)
-                  .join(",");
-                sqlContent += `INSERT INTO \`${tableName}\` (${columns}) VALUES\n${values.join(
-                  ",\n"
-                )};\n`;
+            let dataRows: any[] = [];
+            if (Array.isArray(rows) && rows.length > 0) {
+              if (Array.isArray(rows[0]) && rows[0].length > 0) {
+                dataRows = rows[0];
+              } else {
+                dataRows = rows as any[];
               }
             }
 
-            sqlContent += `/*!40000 ALTER TABLE \`${tableName}\` ENABLE KEYS */;\n`;
-            sqlContent += `UNLOCK TABLES;\n\n`;
+            if (dataRows.length === 0) break;
+
+            // Spalten beim ersten Chunk ermitteln
+            if (!columns) {
+              columns = Object.keys(dataRows[0]);
+            }
+
+            // Beim ersten Chunk Daten-Header schreiben
+            if (!headerWritten) {
+              const dataHdr =
+                `--\n-- Dumping data for table \`${tableName}\`\n--\n\n` +
+                `LOCK TABLES \`${tableName}\` WRITE;\n` +
+                `/*!40000 ALTER TABLE \`${tableName}\` DISABLE KEYS */;\n`;
+              await this.appendToFile(outputPath, dataHdr);
+              headerWritten = true;
+            }
+
+            // INSERT-Statement für diesen Chunk (je 100 Zeilen pro INSERT)
+            const INSERT_BATCH = 100;
+            const colList = columns.map((c) => `\`${c}\``).join(",");
+
+            for (let i = 0; i < dataRows.length; i += INSERT_BATCH) {
+              const batch = dataRows.slice(i, i + INSERT_BATCH);
+              const valueLines = batch.map((row) => {
+                const vals = Object.values(row).map((v) => this.escapeValue(v));
+                return `(${vals.join(",")})`;
+              });
+              await this.appendToFile(
+                outputPath,
+                `INSERT INTO \`${tableName}\` (${colList}) VALUES\n${valueLines.join(",\n")};\n`
+              );
+            }
+
+            totalRows += dataRows.length;
+            offset += ROW_CHUNK_SIZE;
+            console.log(`  → ${tableName}: ${totalRows} Zeilen bisher…`);
+
+            if (dataRows.length < ROW_CHUNK_SIZE) break; // Letzter Chunk
           }
+
+          if (headerWritten) {
+            await this.appendToFile(
+              outputPath,
+              `/*!40000 ALTER TABLE \`${tableName}\` ENABLE KEYS */;\nUNLOCK TABLES;\n\n`
+            );
+          }
+
+          console.log(`✅ Tabelle ${tableName}: ${totalRows} Zeilen exportiert`);
         } catch (tableError) {
           console.error(
             `❌ Fehler beim Exportieren der Tabelle ${tableName}:`,
             tableError
           );
-          sqlContent += `-- Fehler beim Exportieren der Tabelle ${tableName}: ${tableError}\n\n`;
+          await this.appendToFile(
+            outputPath,
+            `-- Fehler beim Exportieren der Tabelle ${tableName}: ${tableError}\n\n`
+          );
         }
 
         processedTables++;
       }
 
       // Footer
-      sqlContent += `/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;\n`;
-      sqlContent += `/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;\n`;
-      sqlContent += `/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;\n`;
-      sqlContent += `/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;\n`;
-      sqlContent += `/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;\n`;
-      sqlContent += `/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;\n`;
-      sqlContent += `/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;\n`;
-      sqlContent += `/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;\n`;
+      const footer =
+        `/*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;\n` +
+        `/*!40101 SET SQL_MODE=@OLD_SQL_MODE */;\n` +
+        `/*!40014 SET FOREIGN_KEY_CHECKS=@OLD_FOREIGN_KEY_CHECKS */;\n` +
+        `/*!40014 SET UNIQUE_CHECKS=@OLD_UNIQUE_CHECKS */;\n` +
+        `/*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;\n` +
+        `/*!40101 SET CHARACTER_SET_RESULTS=@OLD_CHARACTER_SET_RESULTS */;\n` +
+        `/*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;\n` +
+        `/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;\n`;
+      await this.appendToFile(outputPath, footer);
 
-      console.log(`💾 Schreibe SQL-Datei: ${outputPath}`);
-      await fs.writeFile(outputPath, sqlContent, "utf8");
-      console.log("✅ SQL-Datei erfolgreich geschrieben");
+      console.log(`💾 SQL-Dump fertiggestellt: ${outputPath}`);
     } catch (error) {
       console.error("❌ Fehler beim Erstellen des SQL-Dumps:", error);
       throw error;
@@ -356,12 +390,8 @@ export class BackupManager {
 
     const backupId = this.generateBackupId();
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-    const filename = `fotodatenbank_backup_${timestamp}.sql.gz`;
+    const filename = `fotodatenbank_backup_${timestamp}.sql`;
     const backupPath = path.join(this.backupDir, filename);
-    const tempSqlPath = path.join(
-      this.backupDir,
-      `temp_${backupId}.sql`
-    );
 
     try {
       await this.saveStatus({
@@ -378,22 +408,8 @@ export class BackupManager {
         currentTable: "Starte Backup...",
       });
 
-      await this.createSQLDump(tempSqlPath);
-
-      await this.saveStatus({
-        isRunning: true,
-        progress: 90,
-        currentTable: "Komprimiere Backup...",
-      });
-
-      // Datei komprimieren
-      const readStream = require("fs").createReadStream(tempSqlPath);
-      const writeStream = require("fs").createWriteStream(backupPath);
-      const gzipStream = createGzip({ level: 9 });
-      await pipelineAsync(readStream, gzipStream, writeStream);
-
-      // Temporäre SQL-Datei löschen
-      await fs.unlink(tempSqlPath);
+      // SQL-Dump direkt in die finale Datei schreiben (kein gzip)
+      await this.createSQLDump(backupPath);
 
       const stats = await fs.stat(backupPath);
       const fileSize = stats.size;
@@ -418,12 +434,7 @@ export class BackupManager {
     } catch (error) {
       console.error("❌ Backup-Fehler:", error);
 
-      try {
-        await fs.unlink(tempSqlPath);
-      } catch {}
-      try {
-        await fs.unlink(backupPath);
-      } catch {}
+      try { await fs.unlink(backupPath); } catch {}
 
       await this.saveStatus({
         isRunning: false,
@@ -471,13 +482,13 @@ export class BackupManager {
   async getBackupStatus(): Promise<BackupStatus> {
     const status = await this.loadStatus();
 
-    // Prüfe auf hängende Backup-Prozesse (älter als 5 Minuten)
+    // Prüfe auf hängende Backup-Prozesse (älter als 30 Minuten)
     if (status.isRunning) {
       try {
         const statusFileStats = await fs.stat(this.statusFile);
         const statusAge =
           Date.now() - statusFileStats.mtime.getTime();
-        const maxAge = 5 * 60 * 1000; // 5 Minuten
+        const maxAge = 30 * 60 * 1000; // 30 Minuten (vorher: 5 Minuten)
 
         if (statusAge > maxAge) {
           console.warn(
@@ -486,7 +497,7 @@ export class BackupManager {
           const resetStatus = {
             isRunning: false,
             error:
-              "Backup-Prozess wurde nach 5 Minuten Inaktivität zurückgesetzt",
+              "Backup-Prozess wurde nach 30 Minuten Inaktivität zurückgesetzt",
           };
           await this.saveStatus(resetStatus);
           return resetStatus;
