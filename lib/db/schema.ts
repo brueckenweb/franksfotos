@@ -382,6 +382,7 @@ export const fdGpx = mysqlTable("fd_gpx", {
   laengeKm:     varchar("laenge_km", { length: 20 }),   // DECIMAL als String für Flexibilität
   hoehmAuf:     int("hoehenm_auf"),
   datumTour:    date("datum_tour"),
+  sortOrder:    int("sort_order").default(0).notNull(),
   albumId:      int("album_id").references(() => albums.id, { onDelete: "set null" }),
   fotogruppeId: int("fotogruppe_id"),  // soft-ref → fd_fotogruppen.idfgruppe (kein FK-Constraint wegen BIGINT/INT)
   gpxDateiname: varchar("gpx_dateiname", { length: 255 }).notNull().default(""),

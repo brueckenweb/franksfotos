@@ -40,7 +40,7 @@ export async function GET(_request: NextRequest, { params }: Params) {
       .from(fdGpx)
       .leftJoin(users, eq(fdGpx.userId, users.id))
       .where(eq(fdGpx.albumId, id))
-      .orderBy(asc(fdGpx.datumTour), asc(fdGpx.eingetragen));
+      .orderBy(asc(fdGpx.sortOrder), asc(fdGpx.datumTour), asc(fdGpx.eingetragen));
 
     return NextResponse.json({ tracks: rows });
   } catch (err) {

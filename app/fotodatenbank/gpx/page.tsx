@@ -27,6 +27,7 @@ export default async function GpxUebersichtPage() {
       laengeKm:        fdGpx.laengeKm,
       hoehmAuf:        fdGpx.hoehmAuf,
       datumTour:       fdGpx.datumTour,
+      sortOrder:       fdGpx.sortOrder,
       eingetragen:     fdGpx.eingetragen,
       albumId:         fdGpx.albumId,
       albumName:       albums.name,
