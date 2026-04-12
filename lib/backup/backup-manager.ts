@@ -79,18 +79,6 @@ export class BackupManager {
     };
   }
 
-  private async getTableCount(): Promise<number> {
-    try {
-      const dbConfig = await this.getDatabaseConfig();
-      const result = await db.execute(
-        sql`SELECT COUNT(*) as count FROM information_schema.tables WHERE table_schema = ${dbConfig.database} AND table_type = 'BASE TABLE'`
-      );
-      return (result as any)[0]?.count || 0;
-    } catch (error) {
-      console.error("Fehler beim Ermitteln der Tabellenzahl:", error);
-      return 0;
-    }
-  }
 
   /** Hilfsmethode: String inkrementell an Datei anhängen */
   private async appendToFile(filePath: string, content: string): Promise<void> {
@@ -119,7 +107,7 @@ export class BackupManager {
     return `'${String(value)}'`;
   }
 
-  private async createSQLDump(outputPath: string, onProgress?: (table: string, rows: number) => Promise<void>): Promise<void> {
+  private async createSQLDump(outputPath: string): Promise<number> {
     console.log("🔄 Starte Drizzle-basiertes Backup (Chunked-Modus)");
 
     const dbConfig = await this.getDatabaseConfig();
@@ -374,7 +362,8 @@ export class BackupManager {
         `/*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;\n`;
       await this.appendToFile(outputPath, footer);
 
-      console.log(`💾 SQL-Dump fertiggestellt: ${outputPath}`);
+      console.log(`💾 SQL-Dump fertiggestellt: ${outputPath} (${processedTables} Tabellen)`);
+      return processedTables;
     } catch (error) {
       console.error("❌ Fehler beim Erstellen des SQL-Dumps:", error);
       throw error;
@@ -400,8 +389,6 @@ export class BackupManager {
         currentTable: "Initialisierung...",
       });
 
-      const tableCount = await this.getTableCount();
-
       await this.saveStatus({
         isRunning: true,
         progress: 10,
@@ -409,7 +396,8 @@ export class BackupManager {
       });
 
       // SQL-Dump direkt in die finale Datei schreiben (kein gzip)
-      await this.createSQLDump(backupPath);
+      // Rückgabewert = tatsächliche Anzahl exportierter Tabellen
+      const tableCount = await this.createSQLDump(backupPath);
 
       const stats = await fs.stat(backupPath);
       const fileSize = stats.size;

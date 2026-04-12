@@ -76,8 +76,17 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ success: true, tagId: inserted.id, slug });
   } catch (error: unknown) {
-    // Duplikat-Key abfangen
-    if ((error as { code?: string }).code === "ER_DUP_ENTRY") {
+    // Drizzle wraps mysql2-Fehler in Error.cause → beide Ebenen prüfen
+    const isDuplicate = (e: unknown): boolean => {
+      if (!e || typeof e !== "object") return false;
+      const err = e as { code?: string; errno?: number; message?: string; cause?: unknown };
+      if (err.code === "ER_DUP_ENTRY" || err.errno === 1062) return true;
+      if (typeof err.message === "string" && err.message.includes("Duplicate entry")) return true;
+      // Drizzle wraps the original error in .cause
+      if (err.cause) return isDuplicate(err.cause);
+      return false;
+    };
+    if (isDuplicate(error)) {
       return NextResponse.json({ error: "Tag existiert bereits" }, { status: 409 });
     }
     console.error("POST /api/tags Fehler:", error);

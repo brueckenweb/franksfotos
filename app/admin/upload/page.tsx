@@ -2,7 +2,7 @@
 
 import { useState, useRef, useCallback } from "react";
 import { useSearchParams } from "next/navigation";
-import { Upload, X, CheckCircle2, AlertCircle, Loader2, Image as ImageIcon, Film } from "lucide-react";
+import { Upload, X, CheckCircle2, AlertCircle, Loader2, Image as ImageIcon, Film, Tag as TagIcon, ChevronDown } from "lucide-react";
 import AlbumTreeSelect from "../alben/AlbumTreeSelect";
 import exifr from "exifr";
 
@@ -20,6 +20,20 @@ interface Album {
   name: string;
   slug: string;
   parentId: number | null;
+}
+
+interface TagItem {
+  id: number;
+  name: string;
+  groupName: string | null;
+  groupColor: string | null;
+  groupId: number | null;
+}
+
+interface TagGroup {
+  groupName: string | null;
+  groupColor: string | null;
+  tags: TagItem[];
 }
 
 interface VideoMetadata {
@@ -161,21 +175,52 @@ export default function AdminUploadPage() {
   const [albumsLoaded, setAlbumsLoaded] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  // Tag-State
+  const [allTags, setAllTags] = useState<TagItem[]>([]);
+  const [selectedTagIds, setSelectedTagIds] = useState<number[]>([]);
+  const [expandedTagGroups, setExpandedTagGroups] = useState<Set<string>>(new Set());
+
   const loadAlbums = useCallback(async () => {
     if (albumsLoaded) return;
     try {
-      const res = await fetch("/api/albums");
-      const data = await res.json();
-      setAlbums(data.albums || []);
+      const [albumsRes, tagsRes] = await Promise.all([
+        fetch("/api/albums"),
+        fetch("/api/tags"),
+      ]);
+      const albumData = await albumsRes.json();
+      setAlbums(albumData.albums || []);
+      if (tagsRes.ok) setAllTags(await tagsRes.json());
       setAlbumsLoaded(true);
     } catch {
-      console.error("Alben konnten nicht geladen werden");
+      console.error("Daten konnten nicht geladen werden");
     }
   }, [albumsLoaded]);
 
   useState(() => {
     loadAlbums();
   });
+
+  function toggleTag(id: number) {
+    setSelectedTagIds(prev =>
+      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
+    );
+  }
+
+  function toggleTagGroup(key: string) {
+    setExpandedTagGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key); else next.add(key);
+      return next;
+    });
+  }
+
+  // Tags nach Gruppen sortieren (wie in Foto-Edit-Seite)
+  const tagsByGroup = allTags.reduce<Record<string, TagItem[]>>((acc, tag) => {
+    const key = tag.groupName ?? "Ohne Gruppe";
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(tag);
+    return acc;
+  }, {});
 
   function addFiles(newFiles: FileList | File[]) {
     const arr = Array.from(newFiles);
@@ -306,6 +351,8 @@ export default function AdminUploadPage() {
           description: description.trim() || null,
           exifData: exifData ?? null,
           bnummer,
+          // Tags (nur bei Fotos, nicht Videos)
+          ...(!isVideo && selectedTagIds.length > 0 ? { tagIds: selectedTagIds } : {}),
           // Video-spezifische Metadaten
           ...(isVideo ? {
             mimeType:  uploadFile.file.type || null,
@@ -347,6 +394,15 @@ export default function AdminUploadPage() {
     setUploading(false);
   }
 
+  function resetAll() {
+    setFiles([]);
+    setSelectedAlbumId(initialAlbumId);
+    setDescription("");
+    setIsPrivate(false);
+    setSelectedTagIds([]);
+    setExpandedTagGroups(new Set());
+  }
+
   const pendingCount = files.filter((f) => f.status === "pending").length;
   const doneCount = files.filter((f) => f.status === "done").length;
   const errorCount = files.filter((f) => f.status === "error").length;
@@ -384,6 +440,73 @@ export default function AdminUploadPage() {
               <span className="text-sm text-gray-300">Privat (nur für mich sichtbar)</span>
             </label>
           </div>
+          {/* Tag-Auswahl – Akkordeon-Stil wie in Foto-Edit */}
+          {allTags.length > 0 && (
+            <div className="sm:col-span-2">
+              <label className="block text-sm text-gray-400 mb-1.5">
+                <span className="flex items-center gap-1.5">
+                  <TagIcon className="w-3.5 h-3.5" />
+                  Tags
+                  {selectedTagIds.length > 0 && (
+                    <span className="ml-1 text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full px-1.5 py-0.5 font-normal">
+                      {selectedTagIds.length} ausgewählt
+                    </span>
+                  )}
+                </span>
+              </label>
+              <div className="border border-gray-700 rounded-lg overflow-hidden">
+                {Object.entries(tagsByGroup).map(([groupName, groupTags], idx, arr) => {
+                  const isOpen = expandedTagGroups.has(groupName);
+                  const selectedCount = groupTags.filter(t => selectedTagIds.includes(t.id)).length;
+                  return (
+                    <div key={groupName} className={idx < arr.length - 1 ? "border-b border-gray-700" : ""}>
+                      {/* Gruppen-Header */}
+                      <button
+                        type="button"
+                        onClick={() => toggleTagGroup(groupName)}
+                        className="w-full flex items-center justify-between px-3 py-2 hover:bg-gray-800/60 transition-colors text-left"
+                      >
+                        <span className="text-sm font-medium text-gray-300">{groupName}</span>
+                        <div className="flex items-center gap-2">
+                          {selectedCount > 0 && (
+                            <span className="text-xs bg-amber-500/20 text-amber-300 border border-amber-500/30 rounded-full px-1.5 py-0.5">
+                              {selectedCount}
+                            </span>
+                          )}
+                          <ChevronDown
+                            className={`w-3.5 h-3.5 text-gray-500 transition-transform duration-150 ${isOpen ? "rotate-180" : ""}`}
+                          />
+                        </div>
+                      </button>
+                      {/* Tags der Gruppe */}
+                      {isOpen && (
+                        <div className="px-3 py-2.5 flex flex-wrap gap-2 bg-gray-800/40 border-t border-gray-700">
+                          {groupTags.map(tag => {
+                            const active = selectedTagIds.includes(tag.id);
+                            return (
+                              <button
+                                key={tag.id}
+                                type="button"
+                                onClick={() => toggleTag(tag.id)}
+                                className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors border ${
+                                  active
+                                    ? "bg-amber-500/20 border-amber-500/50 text-amber-300"
+                                    : "bg-gray-700 border-gray-600 text-gray-400 hover:border-gray-500 hover:text-gray-300"
+                                }`}
+                              >
+                                {tag.name}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           <div className="sm:col-span-2">
             <label className="block text-sm text-gray-400 mb-1.5">
               Beschreibung{" "}
@@ -541,11 +664,20 @@ export default function AdminUploadPage() {
       )}
 
       {doneCount > 0 && !uploading && pendingCount === 0 && (
-        <div className="flex items-center gap-2 text-green-400 justify-center py-3">
-          <CheckCircle2 className="w-5 h-5" />
-          <span className="font-medium">
-            {doneCount} Datei{doneCount !== 1 ? "en" : ""} erfolgreich hochgeladen!
-          </span>
+        <div className="flex flex-col items-center gap-3 py-3">
+          <div className="flex items-center gap-2 text-green-400">
+            <CheckCircle2 className="w-5 h-5" />
+            <span className="font-medium">
+              {doneCount} Datei{doneCount !== 1 ? "en" : ""} erfolgreich hochgeladen!
+            </span>
+          </div>
+          <button
+            onClick={resetAll}
+            className="flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-gray-300 hover:text-white rounded-lg px-4 py-2 text-sm font-medium transition-colors border border-gray-600"
+          >
+            <Upload className="w-4 h-4" />
+            Neuen Upload starten
+          </button>
         </div>
       )}
     </div>

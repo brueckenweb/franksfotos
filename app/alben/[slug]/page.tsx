@@ -566,6 +566,11 @@ export default async function AlbumPage({ params }: Props) {
     isTagAlbum ? getTagName(album.tagId!) : Promise.resolve(null),
   ]);
 
+  // Fallback: wenn kein Cover manuell gesetzt, erstes Foto des Albums als Hero verwenden
+  const effectiveCoverPhoto = coverPhoto ?? (albumPhotos.length > 0
+    ? { id: albumPhotos[0].id, thumbnailUrl: albumPhotos[0].thumbnailUrl, fileUrl: albumPhotos[0].fileUrl }
+    : null);
+
   const totalMedia = albumPhotos.length + albumVideos.length;
 
   return (
@@ -635,10 +640,10 @@ export default async function AlbumPage({ params }: Props) {
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* ── Album-Cover Hero ─────────────────────────────────────── */}
-        {coverPhoto && (
+        {effectiveCoverPhoto && (
           <AlbumCoverHero
-            fileUrl={coverPhoto.fileUrl}
-            thumbnailUrl={coverPhoto.thumbnailUrl}
+            fileUrl={effectiveCoverPhoto.fileUrl}
+            thumbnailUrl={effectiveCoverPhoto.thumbnailUrl}
             alt={album.name}
           />
         )}

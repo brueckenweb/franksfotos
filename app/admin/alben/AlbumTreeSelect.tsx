@@ -204,7 +204,7 @@ export default function AlbumTreeSelect({
           </button>
 
           {/* Baum */}
-          <div className="overflow-y-auto max-h-60 py-1">
+          <div className="overflow-y-auto max-h-96 py-1">
             {filtered.length === 0 ? (
               <p className="text-gray-500 text-sm px-3 py-2">Keine Alben vorhanden</p>
             ) : (

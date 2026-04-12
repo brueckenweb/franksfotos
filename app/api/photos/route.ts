@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { photos, albums } from "@/lib/db/schema";
+import { photos, albums, photoTags } from "@/lib/db/schema";
 import { eq, desc, like, and, isNull } from "drizzle-orm";
 import { hasPermission, PERMISSIONS } from "@/lib/auth/permissions";
 
@@ -90,6 +90,7 @@ export async function POST(request: NextRequest) {
       isPrivate,
       sortOrder,
       bnummer,
+      tagIds,
     } = body;
 
     if (!filename || !fileUrl) {
@@ -117,6 +118,13 @@ export async function POST(request: NextRequest) {
         createdBy: userId,
       })
       .$returningId();
+
+    // Tags speichern (falls übergeben)
+    if (Array.isArray(tagIds) && tagIds.length > 0) {
+      await db.insert(photoTags).values(
+        tagIds.map((tagId: number) => ({ photoId: inserted.id, tagId }))
+      );
+    }
 
     return NextResponse.json({ success: true, photoId: inserted.id });
   } catch (error) {
