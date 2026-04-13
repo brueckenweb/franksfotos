@@ -219,8 +219,8 @@ async function handleScan(_req, res) {
       const { default: sharp } = await import("sharp");
       const thumbBuf = await sharp(fileMap.get(jpgKey))
         .rotate()                                       // EXIF-Orientation in Pixel einbrennen
-        .resize(900, null, { withoutEnlargement: true })
-        .jpeg({ quality: 80 })
+        .resize(3000, null, { withoutEnlargement: true })
+        .jpeg({ quality: 90 })
         .toBuffer();
       previewBase64 = `data:image/jpeg;base64,${thumbBuf.toString("base64")}`;
     } catch (e) {
