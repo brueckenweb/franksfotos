@@ -190,9 +190,25 @@ async function getAccessibleAlbums(userGroupSlugs: string[], isAdmin = false) {
       }
     }
 
+    // Child-Map für rekursive Foto-Summe aufbauen
+    const albumChildMapForSum = new Map<number, number[]>();
+    for (const a of allAlbums) {
+      if (a.parentId !== null) {
+        if (!albumChildMapForSum.has(a.parentId)) albumChildMapForSum.set(a.parentId, []);
+        albumChildMapForSum.get(a.parentId)!.push(a.id);
+      }
+    }
+
+    function sumPhotosRecursive(albumId: number): number {
+      const direct = photoMap.get(albumId) ?? 0;
+      const subs = albumChildMapForSum.get(albumId) ?? [];
+      return direct + subs.reduce((acc, subId) => acc + sumPhotosRecursive(subId), 0);
+    }
+
     return allAlbums.map((album) => ({
       ...album,
       photoCount: photoMap.get(album.id) ?? 0,
+      totalPhotoCount: sumPhotosRecursive(album.id),
       cover: album.coverPhotoId
         ? (coverMap.get(album.coverPhotoId) ?? null)
         : fallbackCoverMap.has(album.id)
@@ -360,8 +376,8 @@ export default async function AlbenPage() {
                         <p className="text-sm text-gray-500 truncate mt-0.5">{album.description}</p>
                       )}
                       <p className="text-xs text-gray-600 mt-0.5">
-                        {album.photoCount > 0 && `${album.photoCount} Foto${album.photoCount !== 1 ? "s" : ""} · `}
                         {children.length} Unteralbum{children.length !== 1 ? "en" : ""}
+                        {album.totalPhotoCount > 0 && ` · ${album.totalPhotoCount} Foto${album.totalPhotoCount !== 1 ? "s" : ""} gesamt`}
                       </p>
                     </div>
                     <ChevronRight className="w-5 h-5 text-gray-600 group-hover:text-amber-400 transition-colors flex-shrink-0" />
@@ -409,6 +425,7 @@ function AlbumCard({
   childCount: number;
 }) {
   const isLg = size === "lg";
+  const displayPhotoCount = childCount > 0 ? album.totalPhotoCount : album.photoCount;
   return (
     <Link
       href={`/alben/${album.slug}`}
@@ -431,10 +448,11 @@ function AlbumCard({
             />
           </div>
         )}
-        {album.photoCount > 0 && (
+        {/* Foto-Badge: bei Unteralben Gesamtzahl, sonst direkte Anzahl */}
+        {displayPhotoCount > 0 && (
           <div className="absolute bottom-1.5 right-1.5 bg-black/70 rounded-full px-2 py-0.5 flex items-center gap-1">
             <Camera className={`${isLg ? "w-3 h-3" : "w-2.5 h-2.5"} text-amber-400`} />
-            <span className="text-xs text-white">{album.photoCount}</span>
+            <span className="text-xs text-white">{displayPhotoCount}</span>
           </div>
         )}
         {childCount > 0 && (
@@ -456,11 +474,11 @@ function AlbumCard({
           <p className="text-xs text-gray-500 truncate mt-0.5">{album.description}</p>
         )}
         <p className={`text-gray-600 mt-0.5 ${isLg ? "text-xs" : "text-xs"}`}>
-          {album.photoCount === 0
-            ? childCount > 0
-              ? `${childCount} Unteralbum${childCount !== 1 ? "en" : ""}`
-              : "Leer"
-            : `${album.photoCount} Foto${album.photoCount !== 1 ? "s" : ""}`}
+          {childCount > 0
+            ? `${childCount} Unteralbum${childCount !== 1 ? "en" : ""}${album.totalPhotoCount > 0 ? ` · ${album.totalPhotoCount} Foto${album.totalPhotoCount !== 1 ? "s" : ""} gesamt` : ""}`
+            : album.photoCount > 0
+            ? `${album.photoCount} Foto${album.photoCount !== 1 ? "s" : ""}`
+            : "Leer"}
         </p>
       </div>
     </Link>

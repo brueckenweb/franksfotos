@@ -182,10 +182,16 @@ async function getAccessibleChildAlbums(
     const coverMap = new Map(coverPhotos.map((p) => [p.id, p]));
 
     // Alle sichtbaren Alben laden (für Unteralbum-Zählung und Child-Map)
-    const allVisible = await db
-      .select({ id: albums.id, parentId: albums.parentId })
-      .from(albums)
-      .where(and(eq(albums.isActive, true), inArray(albums.id, visibleIds)));
+    // Admin: alle aktiven Alben, damit die Child-Map auch tiefe Unteralben abdeckt
+    const allVisible = isAdmin
+      ? await db
+          .select({ id: albums.id, parentId: albums.parentId })
+          .from(albums)
+          .where(eq(albums.isActive, true))
+      : await db
+          .select({ id: albums.id, parentId: albums.parentId })
+          .from(albums)
+          .where(and(eq(albums.isActive, true), inArray(albums.id, visibleIds)));
 
     // Unteralbum-Anzahl pro Kind + vollständige Child-Map aufbauen
     const childCountMap = new Map<number, number>();
@@ -198,6 +204,29 @@ async function getAccessibleChildAlbums(
         if (!albumChildMap.has(a.parentId)) albumChildMap.set(a.parentId, []);
         albumChildMap.get(a.parentId)!.push(a.id);
       }
+    }
+
+    // Gesamt-Foto-Anzahl (inkl. aller Unteralben) für jedes Kind berechnen
+    const allVisibleIds = allVisible.map((a) => a.id);
+    const allPhotoStats =
+      allVisibleIds.length > 0
+        ? await db
+            .select({ albumId: photos.albumId, cnt: count() })
+            .from(photos)
+            .where(and(eq(photos.isPrivate, false), inArray(photos.albumId, allVisibleIds)))
+            .groupBy(photos.albumId)
+        : [];
+    const allPhotoMap = new Map(allPhotoStats.map((p) => [p.albumId, p.cnt]));
+
+    function sumPhotosRecursive(albumId: number): number {
+      const direct = allPhotoMap.get(albumId) ?? 0;
+      const subs = albumChildMap.get(albumId) ?? [];
+      return direct + subs.reduce((acc, subId) => acc + sumPhotosRecursive(subId), 0);
+    }
+
+    const totalPhotoCountMap = new Map<number, number>();
+    for (const childId of childIds) {
+      totalPhotoCountMap.set(childId, sumPhotosRecursive(childId));
     }
 
     // ── Fallback-Cover: Priorität 2 & 3 ────────────────────────────
@@ -303,6 +332,7 @@ async function getAccessibleChildAlbums(
     const result = children.map((album) => ({
       ...album,
       photoCount: photoMap.get(album.id) ?? 0,
+      totalPhotoCount: totalPhotoCountMap.get(album.id) ?? 0,
       childCount: childCountMap.get(album.id) ?? 0,
       cover: album.coverPhotoId
         ? (coverMap.get(album.coverPhotoId) ?? null)
@@ -696,11 +726,13 @@ export default async function AlbumPage({ params }: Props) {
                       </div>
                     )}
 
-                    {/* Foto-Badge */}
-                    {child.photoCount > 0 && (
+                    {/* Foto-Badge: bei Unteralben Gesamtzahl, sonst direkte Anzahl */}
+                    {(child.childCount > 0 ? child.totalPhotoCount : child.photoCount) > 0 && (
                       <div className="absolute bottom-1.5 right-1.5 bg-black/70 rounded-full px-2 py-0.5 flex items-center gap-1">
                         <Camera className="w-3 h-3 text-amber-400" />
-                        <span className="text-xs text-white">{child.photoCount}</span>
+                        <span className="text-xs text-white">
+                          {child.childCount > 0 ? child.totalPhotoCount : child.photoCount}
+                        </span>
                       </div>
                     )}
 
@@ -718,11 +750,11 @@ export default async function AlbumPage({ params }: Props) {
                       {child.name}
                     </h3>
                     {child.description && (
-                      <p className="text-xs text-gray-500 truncate mt-0.5" dangerouslySetInnerHTML={{ __html: child.description }} />
+                      <div className="text-xs text-gray-500 truncate mt-0.5" dangerouslySetInnerHTML={{ __html: child.description }} />
                     )}
                     <p className="text-xs text-gray-600 mt-0.5">
                       {child.childCount > 0
-                        ? `${child.childCount} Unteralbum${child.childCount !== 1 ? "en" : ""}${child.photoCount > 0 ? ` · ${child.photoCount} Foto${child.photoCount !== 1 ? "s" : ""}` : ""}`
+                        ? `${child.childCount} Unteralbum${child.childCount !== 1 ? "en" : ""}${child.totalPhotoCount > 0 ? ` · ${child.totalPhotoCount} Foto${child.totalPhotoCount !== 1 ? "s" : ""} gesamt` : ""}`
                         : child.photoCount > 0
                         ? `${child.photoCount} Foto${child.photoCount !== 1 ? "s" : ""}`
                         : "Leer"}
