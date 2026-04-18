@@ -4,7 +4,7 @@ import { photos, videos, albums, users, comments, pageViews } from "@/lib/db/sch
 import { count, countDistinct, desc, max, eq } from "drizzle-orm";
 import {
   Camera, Film, FolderOpen, Users, MessageSquare,
-  TrendingUp, Database, Eye, Globe, UserCheck, ArrowRight,
+  TrendingUp, Database, Eye, Globe, UserCheck, ArrowRight, Upload,
 } from "lucide-react";
 import DatabaseBackupPanel from "@/components/admin/DatabaseBackupPanel";
 import Link from "next/link";
@@ -26,6 +26,18 @@ async function getStats() {
     };
   } catch {
     return { photos: 0, videos: 0, albums: 0, users: 0, comments: 0 };
+  }
+}
+
+async function getUserPhotoCount(userId: number): Promise<number> {
+  try {
+    const [result] = await db
+      .select({ total: count() })
+      .from(photos)
+      .where(eq(photos.createdBy, userId));
+    return result?.total ?? 0;
+  } catch {
+    return 0;
   }
 }
 
@@ -63,6 +75,9 @@ export default async function AdminDashboard() {
   const session = await auth();
   const stats = await getStats();
   const accessStats = await getAccessStats();
+
+  const currentUserId = session?.user?.id ? parseInt(session.user.id) : null;
+  const myPhotoCount = currentUserId ? await getUserPhotoCount(currentUserId) : 0;
 
   const statCards = [
     {
@@ -142,6 +157,36 @@ export default async function AdminDashboard() {
           );
         })}
       </div>
+
+      {/* Meine hochgeladenen Fotos */}
+      {currentUserId && (
+        <div className="mb-8">
+          <div className="bg-gray-900 border border-amber-500/30 rounded-xl p-6 flex flex-col sm:flex-row sm:items-center gap-5">
+            <div className="flex items-center gap-4 flex-1 min-w-0">
+              <div className="bg-amber-500/10 rounded-xl p-3 flex-shrink-0">
+                <Upload className="w-7 h-7 text-amber-400" />
+              </div>
+              <div className="min-w-0">
+                <p className="text-gray-400 text-sm mb-0.5">Meine hochgeladenen Fotos</p>
+                <p className="text-4xl font-bold text-amber-400 leading-none">
+                  {myPhotoCount.toLocaleString("de-DE")}
+                </p>
+                <p className="text-gray-500 text-xs mt-1">
+                  Foto{myPhotoCount !== 1 ? "s" : ""} von {session?.user?.name} hochgeladen
+                </p>
+              </div>
+            </div>
+            <Link
+              href={`/admin/fotos?user=${currentUserId}`}
+              className="inline-flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-white font-medium rounded-lg px-5 py-2.5 text-sm transition-colors flex-shrink-0"
+            >
+              <Camera className="w-4 h-4" />
+              Meine Fotos ansehen
+              <ArrowRight className="w-4 h-4" />
+            </Link>
+          </div>
+        </div>
+      )}
 
       {/* Schnellzugriff & Datenbank-Backup */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">

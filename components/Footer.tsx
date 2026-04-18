@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { version } from "@/package.json";
 
 export default function Footer() {
   const currentYear = new Date().getFullYear();
@@ -8,7 +9,8 @@ export default function Footer() {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="flex flex-col md:flex-row items-center justify-between gap-4">
           <div className="text-sm text-gray-400">
-            © {currentYear} FranksFotos. Alle Rechte vorbehalten.
+            © {currentYear} FranksFotos. Alle Rechte vorbehalten.{" "}
+            <span className="text-gray-600">v{version}</span>
           </div>
           <nav className="flex items-center gap-6">
             <Link
