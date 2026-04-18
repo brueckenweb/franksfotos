@@ -27,6 +27,8 @@ export type AlbumWithStats = {
   isActive: boolean;
   photoCount: number;
   videoCount: number;
+  totalPhotoCount: number;
+  totalVideoCount: number;
   visibleFor: string[];
 };
 
@@ -273,9 +275,8 @@ export default function AlbumTableClient({
               <p
                 className="text-gray-500 text-xs break-words mt-0.5"
                 style={{ paddingLeft: depth * 20 + 36 }}
-              >
-                {album.description}
-              </p>
+                dangerouslySetInnerHTML={{ __html: album.description }}
+              />
             )}
           </td>
 
@@ -285,13 +286,19 @@ export default function AlbumTableClient({
           </td>
 
           {/* Fotos */}
-          <td className="px-4 py-3 text-center text-gray-300">
-            {album.photoCount}
+          <td className="px-4 py-3 text-center">
+            <span className="text-gray-300">{album.totalPhotoCount}</span>
+            {hasChildren && album.totalPhotoCount !== album.photoCount && (
+              <span className="block text-gray-600 text-xs">({album.photoCount} direkt)</span>
+            )}
           </td>
 
           {/* Videos */}
-          <td className="px-4 py-3 text-center text-gray-300">
-            {album.videoCount}
+          <td className="px-4 py-3 text-center">
+            <span className="text-gray-300">{album.totalVideoCount}</span>
+            {hasChildren && album.totalVideoCount !== album.videoCount && (
+              <span className="block text-gray-600 text-xs">({album.videoCount} direkt)</span>
+            )}
           </td>
 
           {/* Sichtbar für */}

@@ -54,10 +54,27 @@ async function getAlbumsWithStats() {
       }
     }
 
+    // Child-Map für rekursive Zählung aufbauen
+    const albumChildMap = new Map<number, number[]>();
+    for (const album of allAlbums) {
+      if (album.parentId) {
+        if (!albumChildMap.has(album.parentId)) albumChildMap.set(album.parentId, []);
+        albumChildMap.get(album.parentId)!.push(album.id);
+      }
+    }
+
+    function sumRecursive(albumId: number, countMap: Map<number | null, number>): number {
+      const direct = countMap.get(albumId) ?? 0;
+      const children = albumChildMap.get(albumId) ?? [];
+      return direct + children.reduce((acc, childId) => acc + sumRecursive(childId, countMap), 0);
+    }
+
     return allAlbums.map((album) => ({
       ...album,
       photoCount: photoMap.get(album.id) ?? 0,
       videoCount: videoMap.get(album.id) ?? 0,
+      totalPhotoCount: sumRecursive(album.id, photoMap),
+      totalVideoCount: sumRecursive(album.id, videoMap),
       visibleFor: visibilityMap.get(album.id) ?? [],
     }));
   } catch {
