@@ -621,6 +621,26 @@ export const travelSights = mysqlTable("travel_sights", {
 }));
 
 // ============================================================
+// E-MAIL-VERIFIKATIONS-TOKENS
+// ============================================================
+
+/**
+ * E-Mail-Verifikations-Tokens – für die Account-Aktivierung nach der Registrierung
+ */
+export const emailVerificationTokens = mysqlTable("email_verification_tokens", {
+  id:        int("id").primaryKey().autoincrement(),
+  userId:    int("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
+  token:     varchar("token", { length: 255 }).notNull().unique(),
+  expiresAt: timestamp("expires_at").notNull(),
+  usedAt:    timestamp("used_at"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  tokenIdx:   uniqueIndex("evt_token_idx").on(table.token),
+  userIdx:    index("evt_user_idx").on(table.userId),
+  expiresIdx: index("evt_expires_idx").on(table.expiresAt),
+}));
+
+// ============================================================
 // PASSWORT-RESET-TOKENS
 // ============================================================
 
