@@ -13,7 +13,7 @@ import {
   photoTags,
   tags,
 } from "@/lib/db/schema";
-import { eq, and, inArray, count, or, asc, desc, type SQL } from "drizzle-orm";
+import { eq, and, inArray, count, or, asc, desc, type SQL, sql } from "drizzle-orm";
 import {
   Camera,
   ArrowLeft,
@@ -358,9 +358,15 @@ async function getAccessibleChildAlbums(
 
 /** Baut die ORDER-BY-Ausdrücke für Fotos je nach photoSortMode */
 function buildPhotoOrder(mode: string): SQL[] {
+  // Versuche zuerst das EXIF-Aufnahmedatum (`DateTimeOriginal`) zu verwenden.
+  // exifr speichert mit reviveValues:true ISO-Strings wie "2024-03-15T14:30:45.000Z".
+  // LEFT(..., 19) kürzt auf "YYYY-MM-DD HH:MM:SS", das MySQL als DATETIME parsen kann.
+  // Falls kein EXIF-Datum vorhanden ist, fällt die Sortierung auf `photos.createdAt` zurück.
+  const exifDateExpr = sql`COALESCE(CAST(LEFT(REPLACE(JSON_UNQUOTE(JSON_EXTRACT(${photos.exifData}, '$.DateTimeOriginal')), 'T', ' '), 19) AS DATETIME), ${photos.createdAt})`;
+
   switch (mode) {
     case "created_desc":
-      return [desc(photos.createdAt)];
+      return [desc(exifDateExpr)];
     case "title_asc":
       return [asc(photos.title), asc(photos.filename)];
     case "title_desc":
@@ -371,7 +377,7 @@ function buildPhotoOrder(mode: string): SQL[] {
       return [asc(photos.sortOrder), asc(photos.createdAt)];
     case "created_asc":
     default:
-      return [asc(photos.createdAt)];
+      return [asc(exifDateExpr)];
   }
 }
 
