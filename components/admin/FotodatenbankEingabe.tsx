@@ -719,11 +719,15 @@ export default function FotodatenbankEingabe() {
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <a
-                    href={previewUrl}
+                    href={
+                      scanData?.baseName
+                        ? `${LOCAL_SERVER}/zuverarbeiten-original?baseName=${encodeURIComponent(scanData.baseName)}`
+                        : (previewUrl ?? "#")
+                    }
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-gray-500 hover:text-gray-300 text-xs transition-colors"
-                    title="Vorschau in vollem Umfang öffnen"
+                    title="Originalbild in voller Auflösung öffnen"
                   >
                     🔍 Vollbild
                   </a>

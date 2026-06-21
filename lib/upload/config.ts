@@ -82,6 +82,15 @@ export const UPLOAD_CONFIG: UploadConfig = {
       requiresPermission: "upload_videos",
     },
 
+    // Diashow-Musik (MP3)
+    music: {
+      remote: `${BASE_URL}/musik/`,
+      maxSize: 30 * 1024 * 1024, // 30MB
+      allowedTypes: ["audio/mpeg", "audio/mp3", "audio/x-mp3"],
+      allowedExtensions: [".mp3"],
+      requiresAuth: true,
+    },
+
     // Avatare
     avatars: {
       remote: `${BASE_URL}/avatars/`,

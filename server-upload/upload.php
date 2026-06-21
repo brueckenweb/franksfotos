@@ -22,11 +22,12 @@
 
 $ALLOWED_API_KEY = getenv('UPLOAD_API_KEY') ?: 'eb79f197cb6766d3a889e69ccf5eea0ecfe550ce3d61b043e2e2d9777d62d2a9';
 
-$ALLOWED_PATHS = ['fotos', 'videos', 'avatars', 'thumbs', 'video-thumbs'];
+$ALLOWED_PATHS = ['fotos', 'videos', 'avatars', 'thumbs', 'video-thumbs', 'musik'];
 
 $ALLOWED_TYPES = [
     'image/jpeg', 'image/jpg', 'image/png', 'image/webp', 'image/tiff', 'image/heic',
     'video/mp4', 'video/quicktime', 'video/x-msvideo', 'video/webm', 'video/x-matroska',
+    'audio/mpeg', 'audio/mp3', 'audio/x-mp3',
 ];
 
 $MAX_SIZE = 500 * 1024 * 1024; // 500 MB

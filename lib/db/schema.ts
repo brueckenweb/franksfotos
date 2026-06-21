@@ -124,6 +124,7 @@ export const albums = mysqlTable("albums", {
   sortOrder: int("sort_order").default(0).notNull(),
   childSortMode: varchar("child_sort_mode", { length: 10 }).default("order").notNull(), // 'order' | 'alpha' | 'alpha_desc'
   photoSortMode: varchar("photo_sort_mode", { length: 20 }).default("created_asc").notNull(), // 'created_asc' | 'created_desc' | 'title_asc' | 'title_desc' | 'filename_asc' | 'manual'
+  subalbumSlideshowEnabled: boolean("subalbum_slideshow_enabled").default(false).notNull(),
   isActive: boolean("is_active").default(true).notNull(),
   sourceType: varchar("source_type", { length: 10 }).default("own").notNull(), // 'own' | 'tag'
   tagId: int("tag_id").references(() => tags.id, { onDelete: "set null" }),
@@ -297,6 +298,27 @@ export const videoTags = mysqlTable("video_tags", {
   tagId: int("tag_id").notNull().references(() => tags.id, { onDelete: "cascade" }),
 }, (table) => ({
   pk: primaryKey({ columns: [table.videoId, table.tagId] }),
+}));
+
+// ============================================================
+// DIASHOW-MUSIK
+// ============================================================
+
+/**
+ * Hintergrundmusik für die Unteralbum-Gesamtdiashow
+ * Mehrere MP3s können je Album hochgeladen und sortiert werden.
+ */
+export const albumSlideshowMusic = mysqlTable("album_slideshow_music", {
+  id:           int("id").primaryKey().autoincrement(),
+  albumId:      int("album_id").notNull().references(() => albums.id, { onDelete: "cascade" }),
+  filename:     varchar("filename", { length: 500 }).notNull(),
+  fileUrl:      varchar("file_url", { length: 1000 }).notNull(),
+  title:        varchar("title", { length: 255 }),
+  durationSec:  int("duration_sec"),        // Dauer in Sekunden (aus Browser Audio API)
+  sortOrder:    int("sort_order").default(0).notNull(),
+  createdAt:    timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  albumIdx: index("slideshow_music_album_idx").on(table.albumId),
 }));
 
 // ============================================================

@@ -54,6 +54,28 @@ const FOTOS_PATH    = path.join(cfg.fotodatenbankPath, "fotos");
 
 // ── Hilfsfunktionen ─────────────────────────────────────────────────────────
 
+/**
+ * Liest nur das Aufnahmedatum aus einer Bilddatei (schnell, nur EXIF-Header).
+ * Gibt ein Date-Objekt zurück oder null bei Fehler / fehlendem Datum.
+ */
+async function getExifDate(filePath) {
+  try {
+    const { default: exifr } = await import("exifr");
+    const raw = await exifr.parse(filePath, {
+      pick: ["DateTimeOriginal", "CreateDate", "DateTime"],
+    });
+    if (!raw) return null;
+    const rawDate = raw.DateTimeOriginal ?? raw.CreateDate ?? raw.DateTime ?? null;
+    if (rawDate instanceof Date && !isNaN(rawDate.getTime())) return rawDate;
+    if (typeof rawDate === "string" && rawDate.trim()) {
+      const normalized = rawDate.trim().replace(/^(\d{4}):(\d{2}):(\d{2})/, "$1-$2-$3");
+      const parsed = new Date(normalized);
+      if (!isNaN(parsed.getTime())) return parsed;
+    }
+  } catch { /* ignorieren */ }
+  return null;
+}
+
 function setCors(res) {
   res.setHeader("Access-Control-Allow-Origin",  "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
@@ -122,21 +144,54 @@ async function handleScan(_req, res) {
     return sendJson(res, 200, { leer: true, anzahlZuVerarbeiten: 0 });
   }
 
-  // 3. Anzahl eindeutiger Basisnamen
-  const baseSet = new Set(allFiles.map((f) => normalizeBaseName(f).toLowerCase()));
-  const anzahlZuVerarbeiten = baseSet.size;
-
-  // 4. Ersten Basisnamen auswählen
-  const firstBaseName = normalizeBaseName(allFiles[0]);
-
-  // 5. Alle Dateien mit diesem Basisnamen
-  const fileMap = new Map(); // ext → absoluter Pfad
+  // 3. Dateien nach Basisnamen gruppieren
+  const baseGroupMap = new Map(); // lowerBn → { baseName, files: [] }
   for (const name of allFiles) {
+    const lbn = normalizeBaseName(name).toLowerCase();
+    const bn  = normalizeBaseName(name);
+    if (!baseGroupMap.has(lbn)) baseGroupMap.set(lbn, { baseName: bn, files: [] });
+    baseGroupMap.get(lbn).files.push(name);
+  }
+  const anzahlZuVerarbeiten = baseGroupMap.size;
+
+  // 4. Jede Gruppe nach EXIF-Datum sortieren (1. Kriterium), dann nach Name (2. Kriterium)
+  const EXIF_SORT_PRIORITY = ["jpg", "jpeg", "cr3", "cr2", "hif", "dng", "nef", "arw", "raf"];
+  const sortedGroups = [];
+  for (const [, info] of baseGroupMap) {
+    let exifDate = null;
+    for (const ext of EXIF_SORT_PRIORITY) {
+      const match = info.files.find(
+        (f) => f.slice(f.lastIndexOf(".") + 1).toLowerCase() === ext
+      );
+      if (match) {
+        exifDate = await getExifDate(path.join(ZUVERARBEITEN, match));
+        break;
+      }
+    }
+    sortedGroups.push({ ...info, exifDate });
+  }
+  sortedGroups.sort((a, b) => {
+    if (a.exifDate && b.exifDate) {
+      const diff = a.exifDate.getTime() - b.exifDate.getTime();
+      if (diff !== 0) return diff;
+    } else if (a.exifDate) {
+      return -1;
+    } else if (b.exifDate) {
+      return 1;
+    }
+    return a.baseName.localeCompare(b.baseName, "de");
+  });
+
+  // 5. Erste Gruppe auswählen
+  const firstGroup    = sortedGroups[0];
+  const firstBaseName = firstGroup.baseName;
+
+  // 6. Alle Dateien der ersten Gruppe in eine Map (ext → absoluter Pfad)
+  const fileMap = new Map();
+  for (const name of firstGroup.files) {
     const extIdx = name.lastIndexOf(".");
     const ext    = extIdx >= 0 ? name.slice(extIdx + 1).toLowerCase() : "";
-    if (normalizeBaseName(name).toLowerCase() === firstBaseName.toLowerCase()) {
-      fileMap.set(ext, path.join(ZUVERARBEITEN, name));
-    }
+    fileMap.set(ext, path.join(ZUVERARBEITEN, name));
   }
 
   // 6. Bildtyp
@@ -484,8 +539,8 @@ async function handleThumbnail(req, res) {
       const { default: sharp } = await import("sharp");
       const buf = await sharp(jpgPath)
         .rotate()
-        .resize(250, null, { withoutEnlargement: true })
-        .jpeg({ quality: 75 })
+        .resize(400, null, { withoutEnlargement: true })
+        .jpeg({ quality: 90 })
         .toBuffer();
 
       res.writeHead(200, {
@@ -787,6 +842,125 @@ async function handlePrepareGalerie(req, res) {
   }
 }
 
+/**
+ * GET /fullres?bnummer=12345&pfad=1bilder
+ * Liefert das Original-JPG von F:\{pfad}\ in voller Auflösung (kein Downscale).
+ * Unterstützt Range-Requests für schnelles Öffnen im Browser.
+ */
+async function handleFullres(req, res) {
+  const url     = new URL(req.url, `http://localhost:${cfg.port}`);
+  const bnummer = url.searchParams.get("bnummer");
+  const pfad    = url.searchParams.get("pfad") || "";
+
+  if (!bnummer) {
+    res.writeHead(400, { "Content-Type": "text/plain" });
+    return res.end("bnummer fehlt");
+  }
+
+  const basePath = cfg.fotosBasePath || "F:\\";
+  const jpgPath  = pfad
+    ? path.join(basePath, pfad, `B${bnummer}.jpg`)
+    : path.join(basePath, `B${bnummer}.jpg`);
+
+  if (!fs.existsSync(jpgPath)) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    return res.end(`Datei nicht gefunden: ${jpgPath}`);
+  }
+
+  const stat     = fs.statSync(jpgPath);
+  const fileSize = stat.size;
+  const range    = req.headers["range"];
+
+  if (range) {
+    const parts = range.replace(/bytes=/, "").split("-");
+    const start = parseInt(parts[0], 10);
+    const end   = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunk = end - start + 1;
+    res.writeHead(206, {
+      "Content-Range":  `bytes ${start}-${end}/${fileSize}`,
+      "Accept-Ranges":  "bytes",
+      "Content-Length": chunk,
+      "Content-Type":   "image/jpeg",
+      "Cache-Control":  "public, max-age=3600",
+    });
+    fs.createReadStream(jpgPath, { start, end }).pipe(res);
+  } else {
+    res.writeHead(200, {
+      "Content-Type":   "image/jpeg",
+      "Content-Length": fileSize,
+      "Accept-Ranges":  "bytes",
+      "Cache-Control":  "public, max-age=3600",
+    });
+    fs.createReadStream(jpgPath).pipe(res);
+  }
+}
+
+/**
+ * GET /zuverarbeiten-original?baseName=20240615_123456
+ * Liefert das Original-JPG aus dem zuverarbeiten-Ordner in voller Auflösung.
+ * Wird in der Eingabe-Ansicht für den "Vollbild"-Link verwendet.
+ */
+async function handleZuverarbeitenOriginal(req, res) {
+  const url      = new URL(req.url, `http://localhost:${cfg.port}`);
+  const baseName = url.searchParams.get("baseName");
+
+  if (!baseName) {
+    res.writeHead(400, { "Content-Type": "text/plain" });
+    return res.end("baseName fehlt");
+  }
+
+  if (!fs.existsSync(ZUVERARBEITEN)) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    return res.end(`zuverarbeiten-Ordner nicht gefunden: ${ZUVERARBEITEN}`);
+  }
+
+  // JPG-Datei für diesen Basisnamen suchen
+  const JPG_EXTS = ["jpg", "jpeg", "dsc"];
+  const allFiles = fs.readdirSync(ZUVERARBEITEN).filter((n) =>
+    fs.statSync(path.join(ZUVERARBEITEN, n)).isFile()
+  );
+  let jpgPath = null;
+  for (const name of allFiles) {
+    const ext = name.slice(name.lastIndexOf(".") + 1).toLowerCase();
+    if (JPG_EXTS.includes(ext) && normalizeBaseName(name).toLowerCase() === baseName.toLowerCase()) {
+      jpgPath = path.join(ZUVERARBEITEN, name);
+      break;
+    }
+  }
+
+  if (!jpgPath) {
+    res.writeHead(404, { "Content-Type": "text/plain" });
+    return res.end(`Kein JPG für baseName "${baseName}" gefunden`);
+  }
+
+  const stat     = fs.statSync(jpgPath);
+  const fileSize = stat.size;
+  const range    = req.headers["range"];
+
+  if (range) {
+    const parts = range.replace(/bytes=/, "").split("-");
+    const start = parseInt(parts[0], 10);
+    const end   = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+    const chunk = end - start + 1;
+    res.writeHead(206, {
+      "Content-Range":  `bytes ${start}-${end}/${fileSize}`,
+      "Accept-Ranges":  "bytes",
+      "Content-Length": chunk,
+      "Content-Type":   "image/jpeg",
+      "Cache-Control":  "no-cache",
+    });
+    fs.createReadStream(jpgPath, { start, end }).pipe(res);
+  } else {
+    res.writeHead(200, {
+      "Content-Type":   "image/jpeg",
+      "Content-Length": fileSize,
+      "Accept-Ranges":  "bytes",
+      "Cache-Control":  "no-cache",
+    });
+    fs.createReadStream(jpgPath).pipe(res);
+  }
+}
+
 // ── HTTP-Server ──────────────────────────────────────────────────────────────
 
 const server = http.createServer(async (req, res) => {
@@ -806,10 +980,12 @@ const server = http.createServer(async (req, res) => {
     if (route === "/scan"             && req.method === "GET")  return await handleScan(req, res);
     if (route === "/process"          && req.method === "POST") return await handleProcess(req, res);
     if (route === "/delete"           && req.method === "POST") return await handleDelete(req, res);
-    if (route === "/thumbnail"        && req.method === "GET")  return await handleThumbnail(req, res);
-    if (route === "/video"            && req.method === "GET")  return await handleVideo(req, res);
-    if (route === "/files"            && req.method === "GET")  return await handleFiles(req, res);
-    if (route === "/prepare-galerie"  && req.method === "POST") return await handlePrepareGalerie(req, res);
+    if (route === "/thumbnail"               && req.method === "GET")  return await handleThumbnail(req, res);
+    if (route === "/fullres"                 && req.method === "GET")  return await handleFullres(req, res);
+    if (route === "/zuverarbeiten-original"  && req.method === "GET")  return await handleZuverarbeitenOriginal(req, res);
+    if (route === "/video"                   && req.method === "GET")  return await handleVideo(req, res);
+    if (route === "/files"                   && req.method === "GET")  return await handleFiles(req, res);
+    if (route === "/prepare-galerie"         && req.method === "POST") return await handlePrepareGalerie(req, res);
 
     sendJson(res, 404, { error: `Route nicht gefunden: ${route}` });
   } catch (err) {

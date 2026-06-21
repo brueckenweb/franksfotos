@@ -72,7 +72,7 @@ export async function PUT(
     const { id } = await params;
     const albumId = parseInt(id);
     const body = await request.json();
-    const { name, slug, description, parentId, sortOrder, isActive, childSortMode, photoSortMode, coverPhotoId, visibleForGroups, sourceType, tagId } = body;
+    const { name, slug, description, parentId, sortOrder, isActive, childSortMode, photoSortMode, coverPhotoId, visibleForGroups, sourceType, tagId, subalbumSlideshowEnabled } = body;
 
     const validPhotoSortModes = ["created_asc", "created_desc", "title_asc", "title_desc", "filename_asc", "manual"];
     const safePhotoSortMode = validPhotoSortModes.includes(photoSortMode) ? photoSortMode : "created_asc";
@@ -89,6 +89,7 @@ export async function PUT(
         isActive: isActive ?? true,
         childSortMode: ["alpha", "alpha_desc"].includes(childSortMode) ? childSortMode : "order",
         photoSortMode: safePhotoSortMode,
+        subalbumSlideshowEnabled: subalbumSlideshowEnabled ?? false,
         coverPhotoId: coverPhotoId ?? null,
         sourceType: safeSourceType,
         tagId: safeSourceType === "tag" && tagId ? parseInt(tagId) : null,

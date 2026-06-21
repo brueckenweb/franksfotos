@@ -3,7 +3,7 @@
 import { useEffect, useState, useRef } from "react";
 import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
-import { ArrowLeft, Save, Loader2, Camera, Search, X, Tag } from "lucide-react";
+import { ArrowLeft, Save, Loader2, Camera, Search, X, Tag, Music, Trash2, GripVertical, SlidersHorizontal } from "lucide-react";
 import AlbumTreeSelect from "../../AlbumTreeSelect";
 import type { AlbumOption } from "../../AlbumTreeSelect";
 import TagGroupSelect from "../../TagGroupSelect";
@@ -59,6 +59,23 @@ interface SearchPhoto extends AlbumPhoto {
   albumName: string | null;
 }
 
+interface MusicEntry {
+  id: number;
+  albumId?: number;
+  filename: string;
+  fileUrl: string;
+  title: string | null;
+  durationSec: number | null;
+  sortOrder: number;
+}
+
+/** Sekunden in mm:ss formatieren */
+function fmtSec(sec: number): string {
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 export default function EditAlbumPage() {
   const router = useRouter();
   const params = useParams();
@@ -81,6 +98,16 @@ export default function EditAlbumPage() {
   const [searchLoading, setSearchLoading] = useState(false);
   const searchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Diashow-Musik-State
+  const [musicList, setMusicList] = useState<MusicEntry[]>([]);
+  const [musicLoading, setMusicLoading] = useState(false);
+  const [uploadingMp3, setUploadingMp3] = useState(false);
+  const [mp3UploadError, setMp3UploadError] = useState("");
+  const [subalbumSlides, setSubalbumSlides] = useState<number | null>(null);
+  const [dragMusicId, setDragMusicId] = useState<number | null>(null);
+  const [dragOverMusicId, setDragOverMusicId] = useState<number | null>(null);
+  const musicFileRef = useRef<HTMLInputElement | null>(null);
+
   const [form, setForm] = useState({
     name: "",
     slug: "",
@@ -89,6 +116,7 @@ export default function EditAlbumPage() {
     sortOrder: "0",
     childSortMode: "order",
     photoSortMode: "created_asc",
+    subalbumSlideshowEnabled: false,
     isActive: true,
     coverPhotoId: "",
     visibleForGroups: [] as string[],
@@ -139,6 +167,7 @@ export default function EditAlbumPage() {
             sortOrder: String(albumData.album.sortOrder ?? 0),
             childSortMode: albumData.album.childSortMode ?? "order",
             photoSortMode: albumData.album.photoSortMode ?? "created_asc",
+            subalbumSlideshowEnabled: albumData.album.subalbumSlideshowEnabled ?? false,
             isActive: albumData.album.isActive,
             coverPhotoId: albumData.album.coverPhotoId
               ? String(albumData.album.coverPhotoId)
@@ -159,6 +188,40 @@ export default function EditAlbumPage() {
     }
     load();
   }, [albumId]);
+
+  // Musik laden
+  useEffect(() => {
+    if (!albumId) return;
+    setMusicLoading(true);
+    fetch(`/api/albums/${albumId}/slideshow-music`)
+      .then((r) => r.json())
+      .then((data) => setMusicList(data.music ?? []))
+      .catch(() => {})
+      .finally(() => setMusicLoading(false));
+  }, [albumId]);
+
+  // Unteralbum-Folien-Anzahl für Dauer-Schätzung laden
+  useEffect(() => {
+    if (!form.subalbumSlideshowEnabled || !albumId) {
+      setSubalbumSlides(null);
+      return;
+    }
+    fetch(`/api/albums/${albumId}/subalbum-slideshow`)
+      .then((r) => r.json())
+      .then((data) => {
+        if (data.subAlbums) {
+          // 1 Albumtitelfolie + pro Unteralbum: 1 Titelfolie + Fotos + Videos
+          const total =
+            1 +
+            (data.subAlbums as Array<{ photos: unknown[]; videos: unknown[] }>).reduce(
+              (acc, sub) => acc + 1 + sub.photos.length + sub.videos.length,
+              0
+            );
+          setSubalbumSlides(total);
+        }
+      })
+      .catch(() => setSubalbumSlides(null));
+  }, [form.subalbumSlideshowEnabled, albumId]);
 
   // Debounced-Suche über alle Fotos
   useEffect(() => {
@@ -195,7 +258,7 @@ export default function EditAlbumPage() {
       const res = await fetch(`/api/albums/${albumId}`, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      body: JSON.stringify({
           name: form.name,
           slug: form.slug,
           description: form.description,
@@ -203,6 +266,7 @@ export default function EditAlbumPage() {
           sortOrder: parseInt(form.sortOrder) || 0,
           childSortMode: form.childSortMode,
           photoSortMode: form.photoSortMode,
+          subalbumSlideshowEnabled: form.subalbumSlideshowEnabled,
           isActive: form.isActive,
           coverPhotoId: form.coverPhotoId ? parseInt(form.coverPhotoId) : null,
           visibleForGroups: form.visibleForGroups,
@@ -652,6 +716,227 @@ export default function EditAlbumPage() {
               )}
             </div>
           )}
+        </div>
+
+        {/* ── Gesamtdiashow ────────────────────────────────────────── */}
+        <div className="border border-gray-700 rounded-xl p-4 space-y-4">
+          <div className="flex items-center gap-2">
+            <SlidersHorizontal className="w-4 h-4 text-amber-400" />
+            <span className="text-sm font-semibold text-gray-200">Gesamtdiashow</span>
+          </div>
+
+          {/* Aktivieren */}
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={form.subalbumSlideshowEnabled}
+              onChange={(e) =>
+                setForm((p) => ({ ...p, subalbumSlideshowEnabled: e.target.checked }))
+              }
+              className="mt-0.5 w-4 h-4 rounded border-gray-600 bg-gray-800 text-amber-500"
+            />
+            <div>
+              <span className="text-gray-200 text-sm font-medium">
+                Gesamtdiashow aktivieren
+              </span>
+              <p className="text-gray-500 text-xs mt-0.5">
+                Zeigt auf der Album-Seite einen Button, der durch alle Unteralben führt
+                (Fotos + Videos, Fade-Übergang, Hintergrundmusik).
+              </p>
+            </div>
+          </label>
+
+          {/* Dauer-Schätzung */}
+          {form.subalbumSlideshowEnabled && (
+            <div className="bg-gray-800 rounded-lg p-3 space-y-1.5 text-sm">
+              {subalbumSlides === null ? (
+                <div className="flex items-center gap-2 text-gray-500">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Dauer wird berechnet…
+                </div>
+              ) : (
+                <>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">Folien gesamt</span>
+                    <span className="text-white font-medium">{subalbumSlides}</span>
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <span className="text-gray-400">Geschätzte Diashow-Dauer (5 Sek/Folie)</span>
+                    <span className="text-white font-medium">
+                      {fmtSec(subalbumSlides * 5)}
+                    </span>
+                  </div>
+                  {musicList.length > 0 && (() => {
+                    const totalMusic = musicList.reduce((a, m) => a + (m.durationSec ?? 0), 0);
+                    const slideshowSec = subalbumSlides * 5;
+                    const diff = totalMusic - slideshowSec;
+                    return (
+                      <>
+                        <div className="flex items-center justify-between border-t border-gray-700 pt-1.5 mt-1.5">
+                          <span className="text-gray-400">Musik verfügbar</span>
+                          <span className="text-white font-medium">{fmtSec(totalMusic)}</span>
+                        </div>
+                        <div className="flex items-center justify-between">
+                          <span className="text-gray-400">Differenz</span>
+                          <span className={diff >= 0 ? "text-green-400 font-medium" : "text-amber-400 font-medium"}>
+                            {diff >= 0 ? `+${fmtSec(diff)} Musik übrig` : `${fmtSec(Math.abs(diff))} Musik fehlt`}
+                          </span>
+                        </div>
+                      </>
+                    );
+                  })()}
+                </>
+              )}
+            </div>
+          )}
+
+          {/* Hintergrundmusik */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-gray-300 text-sm font-medium flex items-center gap-1.5">
+                <Music className="w-3.5 h-3.5 text-amber-400" />
+                Hintergrundmusik
+              </span>
+              <button
+                type="button"
+                onClick={() => musicFileRef.current?.click()}
+                disabled={uploadingMp3}
+                className="flex items-center gap-1.5 text-xs bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white px-3 py-1.5 rounded-lg transition-colors"
+              >
+                {uploadingMp3 ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Music className="w-3.5 h-3.5" />
+                )}
+                MP3 hochladen
+              </button>
+              <input
+                ref={musicFileRef}
+                type="file"
+                accept=".mp3,audio/mpeg"
+                className="hidden"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  e.target.value = "";
+                  setMp3UploadError("");
+                  setUploadingMp3(true);
+
+                  // Dauer aus Browser Audio API auslesen
+                  let durationSec: number | null = null;
+                  try {
+                    await new Promise<void>((resolve) => {
+                      const audio = new Audio();
+                      const url = URL.createObjectURL(file);
+                      audio.src = url;
+                      audio.onloadedmetadata = () => {
+                        durationSec = Math.round(audio.duration);
+                        URL.revokeObjectURL(url);
+                        resolve();
+                      };
+                      audio.onerror = () => { URL.revokeObjectURL(url); resolve(); };
+                      setTimeout(resolve, 5000); // Timeout
+                    });
+                  } catch { /* ignore */ }
+
+                  try {
+                    const fd = new FormData();
+                    fd.append("file", file);
+                    fd.append("title", file.name.replace(/\.[^/.]+$/, ""));
+                    if (durationSec !== null) fd.append("durationSec", String(durationSec));
+
+                    const res = await fetch(`/api/albums/${albumId}/slideshow-music`, {
+                      method: "POST",
+                      body: fd,
+                    });
+                    const data = await res.json();
+                    if (!res.ok) {
+                      setMp3UploadError(data.error || "Upload fehlgeschlagen");
+                    } else {
+                      setMusicList((prev) => [...prev, data.music]);
+                    }
+                  } catch {
+                    setMp3UploadError("Netzwerkfehler beim Upload");
+                  } finally {
+                    setUploadingMp3(false);
+                  }
+                }}
+              />
+            </div>
+
+            {mp3UploadError && (
+              <p className="text-red-400 text-xs mb-2">{mp3UploadError}</p>
+            )}
+
+            {musicLoading ? (
+              <div className="flex items-center gap-2 text-gray-500 text-sm py-2">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Musik wird geladen…
+              </div>
+            ) : musicList.length === 0 ? (
+              <p className="text-gray-600 text-xs py-2">
+                Noch keine Musik hochgeladen. MP3-Dateien werden in der Diashow als
+                Hintergrundmusik nahtlos hintereinander abgespielt.
+              </p>
+            ) : (
+              <div className="space-y-1">
+                {musicList.map((m, idx) => (
+                  <div
+                    key={m.id}
+                    draggable
+                    onDragStart={() => setDragMusicId(m.id)}
+                    onDragOver={(e) => { e.preventDefault(); setDragOverMusicId(m.id); }}
+                    onDragEnd={() => { setDragMusicId(null); setDragOverMusicId(null); }}
+                    onDrop={async () => {
+                      if (dragMusicId === null || dragMusicId === m.id) return;
+                      const fromIdx = musicList.findIndex((x) => x.id === dragMusicId);
+                      const toIdx = idx;
+                      if (fromIdx === -1) return;
+                      const newList = [...musicList];
+                      const [removed] = newList.splice(fromIdx, 1);
+                      newList.splice(toIdx, 0, removed);
+                      const updated = newList.map((item, i) => ({ ...item, sortOrder: i + 1 }));
+                      setMusicList(updated);
+                      setDragMusicId(null);
+                      setDragOverMusicId(null);
+                      await fetch(`/api/albums/${albumId}/slideshow-music`, {
+                        method: "PUT",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ order: updated.map((x) => ({ id: x.id, sortOrder: x.sortOrder })) }),
+                      });
+                    }}
+                    className={`flex items-center gap-2 bg-gray-800 rounded-lg px-2.5 py-2 transition-colors ${
+                      dragOverMusicId === m.id ? "ring-1 ring-amber-500 bg-amber-500/10" : ""
+                    } ${dragMusicId === m.id ? "opacity-40" : ""}`}
+                  >
+                    <GripVertical className="w-3.5 h-3.5 text-gray-600 cursor-grab flex-shrink-0" />
+                    <Music className="w-3.5 h-3.5 text-amber-400 flex-shrink-0" />
+                    <span className="text-gray-200 text-xs flex-1 truncate">
+                      {m.title || m.filename}
+                    </span>
+                    {m.durationSec !== null && m.durationSec !== undefined && (
+                      <span className="text-gray-500 text-xs flex-shrink-0">{fmtSec(m.durationSec)}</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={async () => {
+                        await fetch(`/api/albums/${albumId}/slideshow-music/${m.id}`, { method: "DELETE" });
+                        setMusicList((prev) => prev.filter((x) => x.id !== m.id));
+                      }}
+                      className="text-gray-600 hover:text-red-400 transition-colors flex-shrink-0 p-0.5"
+                      title="Löschen"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ))}
+                <p className="text-gray-600 text-xs mt-1">
+                  Reihenfolge per Drag &amp; Drop ändern •{" "}
+                  Gesamt: {fmtSec(musicList.reduce((a, m) => a + (m.durationSec ?? 0), 0))}
+                </p>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex items-center gap-3 pt-2">

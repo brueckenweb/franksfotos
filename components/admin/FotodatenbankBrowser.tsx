@@ -328,6 +328,10 @@ export default function FotodatenbankBrowser() {
     return `${LOCAL_SERVER}/thumbnail?bnummer=${e.bnummer}&pfad=${encodeURIComponent(e.pfad)}`;
   }
 
+  function fullresUrl(e: FdEintrag) {
+    return `${LOCAL_SERVER}/fullres?bnummer=${e.bnummer}&pfad=${encodeURIComponent(e.pfad)}`;
+  }
+
   function videoUrl(e: FdEintrag) {
     return `${LOCAL_SERVER}/video?bnummer=${e.bnummer}&pfad=${encodeURIComponent(e.pfad)}`;
   }
@@ -443,11 +447,19 @@ export default function FotodatenbankBrowser() {
                     {/* Thumbnail / Video */}
                     <td className="px-3 py-2">
                       {localOk ? (
-                        <ThumbnailCell
-                          thumbSrc={thumbnailUrl(e)}
-                          videoSrc={videoUrl(e)}
-                          alt={`B${e.bnummer}`}
-                        />
+                        <a
+                          href={fullresUrl(e)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          title="Vollbild öffnen"
+                          className="block"
+                        >
+                          <ThumbnailCell
+                            thumbSrc={thumbnailUrl(e)}
+                            videoSrc={videoUrl(e)}
+                            alt={`B${e.bnummer}`}
+                          />
+                        </a>
                       ) : (
                         <div className="w-12 h-10 rounded bg-gray-800 flex items-center justify-center">
                           <Camera className="w-4 h-4 text-gray-600" />
@@ -723,12 +735,30 @@ export default function FotodatenbankBrowser() {
 
           <div className="p-6">
             {/* Vorschau groß: Foto oder Video */}
-            <div className="mb-4 flex justify-center">
-              <MediaPreview
-                thumbSrc={`${LOCAL_SERVER}/thumbnail?bnummer=${dateienEntry.bnummer}&pfad=${encodeURIComponent(dateienEntry.pfad)}`}
-                videoSrc={`${LOCAL_SERVER}/video?bnummer=${dateienEntry.bnummer}&pfad=${encodeURIComponent(dateienEntry.pfad)}`}
-                className="max-h-48 max-w-full"
-              />
+            <div className="mb-3 flex justify-center">
+              <a
+                href={`${LOCAL_SERVER}/fullres?bnummer=${dateienEntry.bnummer}&pfad=${encodeURIComponent(dateienEntry.pfad)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Originalbild in voller Auflösung öffnen"
+                className="block"
+              >
+                <MediaPreview
+                  thumbSrc={`${LOCAL_SERVER}/thumbnail?bnummer=${dateienEntry.bnummer}&pfad=${encodeURIComponent(dateienEntry.pfad)}`}
+                  videoSrc={`${LOCAL_SERVER}/video?bnummer=${dateienEntry.bnummer}&pfad=${encodeURIComponent(dateienEntry.pfad)}`}
+                  className="max-h-48 max-w-full"
+                />
+              </a>
+            </div>
+            <div className="mb-4 text-center">
+              <a
+                href={`${LOCAL_SERVER}/fullres?bnummer=${dateienEntry.bnummer}&pfad=${encodeURIComponent(dateienEntry.pfad)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-gray-500 hover:text-gray-300 text-xs transition-colors"
+              >
+                🔍 Vollbild in voller Auflösung öffnen
+              </a>
             </div>
 
             {dateienLoad ? (

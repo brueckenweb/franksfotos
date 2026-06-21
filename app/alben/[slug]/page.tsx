@@ -30,6 +30,7 @@ import AlbumGpxPanel from "@/components/gpx/AlbumGpxPanel";
 import PhotoThumbnail from "./PhotoThumbnail";
 import AlbumCoverHero from "./AlbumCoverHero";
 import AlbumSlideshow from "./AlbumSlideshow";
+import AlbumSubalbumSlideshow from "./AlbumSubalbumSlideshow";
 import VideoCard from "./VideoCard";
 
 type Props = { params: Promise<{ slug: string }> };
@@ -51,7 +52,20 @@ function getDescendantIds(albumId: number, childMap: Map<number, number[]>): num
 async function getAlbum(slug: string) {
   try {
     const result = await db
-      .select()
+      .select({
+        id: albums.id,
+        name: albums.name,
+        slug: albums.slug,
+        description: albums.description,
+        isActive: albums.isActive,
+        parentId: albums.parentId,
+        coverPhotoId: albums.coverPhotoId,
+        childSortMode: albums.childSortMode,
+        photoSortMode: albums.photoSortMode,
+        sourceType: albums.sourceType,
+        tagId: albums.tagId,
+        subalbumSlideshowEnabled: albums.subalbumSlideshowEnabled,
+      })
       .from(albums)
       .where(eq(albums.slug, slug))
       .limit(1);
@@ -705,13 +719,18 @@ export default async function AlbumPage({ params }: Props) {
         {/* ── Unteralben-Grid ─────────────────────────────────────── */}
         {childAlbums.length > 0 && (
           <section className="mb-10">
-            <h2 className="text-lg font-semibold text-white mb-4 flex items-center gap-2">
-              <FolderOpen className="w-4 h-4 text-amber-400" />
-              {album.name}
-              <span className="text-gray-500 font-normal text-sm">({childAlbums.length})</span>
-            </h2>
+            <div className="flex items-center justify-between mb-4 gap-4 flex-wrap">
+              <h2 className="text-lg font-semibold text-white flex items-center gap-2">
+                <FolderOpen className="w-4 h-4 text-amber-400" />
+                {album.name}
+                <span className="text-gray-500 font-normal text-sm">({childAlbums.length})</span>
+              </h2>
+              {album.subalbumSlideshowEnabled && (
+                <AlbumSubalbumSlideshow albumId={album.id} albumName={album.name} />
+              )}
+            </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4" style={{ marginTop: 0 }}>
               {childAlbums.map((child) => (
                 <Link
                   key={child.id}
