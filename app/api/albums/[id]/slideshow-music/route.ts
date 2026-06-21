@@ -9,7 +9,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { albumSlideshowMusic, albums } from "@/lib/db/schema";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, desc } from "drizzle-orm";
 import { UPLOAD_CONFIG, UploadConfigHelper } from "@/lib/upload/config";
 
 type Props = { params: Promise<{ id: string }> };
@@ -136,26 +136,37 @@ export async function POST(request: NextRequest, { params }: Props) {
       : 1;
 
     // DB-Eintrag anlegen
-    const inserted = await db.insert(albumSlideshowMusic).values({
+    const resolvedTitle = title || actualFileName.replace(/\.[^/.]+$/, "");
+    const resolvedDuration = durationSec && !isNaN(durationSec) ? durationSec : null;
+
+    await db.insert(albumSlideshowMusic).values({
       albumId,
       filename: actualFileName,
       fileUrl,
-      title: title || actualFileName.replace(/\.[^/.]+$/, ""),
-      durationSec: isNaN(durationSec!) ? null : durationSec,
+      title: resolvedTitle,
+      durationSec: resolvedDuration,
       sortOrder: nextSortOrder,
     });
 
-    const newId = Number((inserted as { insertId?: number }).insertId ?? 0);
+    // ID des neuen Eintrags zuverlässig aus der DB holen
+    const inserted = await db
+      .select()
+      .from(albumSlideshowMusic)
+      .where(eq(albumSlideshowMusic.albumId, albumId))
+      .orderBy(desc(albumSlideshowMusic.id))
+      .limit(1);
+
+    const newEntry = inserted[0];
 
     return NextResponse.json({
       success: true,
       music: {
-        id: newId,
+        id: newEntry.id,
         albumId,
         filename: actualFileName,
         fileUrl,
-        title: title || actualFileName.replace(/\.[^/.]+$/, ""),
-        durationSec: isNaN(durationSec!) ? null : durationSec,
+        title: resolvedTitle,
+        durationSec: resolvedDuration,
         sortOrder: nextSortOrder,
       },
     });
