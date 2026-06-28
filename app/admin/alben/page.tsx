@@ -97,21 +97,22 @@ export default async function AdminAlbenPage({
 
   function sortAlbumList<T extends { name: string; sortOrder: number }>(
     arr: T[],
-    alpha: boolean
+    mode: "order" | "alpha" | "alpha_desc"
   ): T[] {
-    return [...arr].sort((a, b) =>
-      alpha
-        ? a.name.localeCompare(b.name, "de")
-        : a.sortOrder !== b.sortOrder
+    return [...arr].sort((a, b) => {
+      if (mode === "alpha") return a.name.localeCompare(b.name, "de");
+      if (mode === "alpha_desc") return b.name.localeCompare(a.name, "de");
+      // "order" (manuelle Reihenfolge)
+      return a.sortOrder !== b.sortOrder
         ? a.sortOrder - b.sortOrder
-        : a.name.localeCompare(b.name, "de")
-    );
+        : a.name.localeCompare(b.name, "de");
+    });
   }
 
   // Top-Level-Alben
   const rootAlbums: AlbumWithStats[] = sortAlbumList(
     allAlbums.filter((a) => !a.parentId),
-    isAlpha
+    isAlpha ? "alpha" : "order"
   );
 
   // childMap aufbauen und sortieren
@@ -125,8 +126,11 @@ export default async function AdminAlbenPage({
   }
   for (const [parentId, children] of childMapRaw) {
     const parent = albumById.get(parentId);
-    const useAlpha = parent?.childSortMode === "alpha";
-    childMapRaw.set(parentId, sortAlbumList(children, useAlpha));
+    const sortMode =
+      parent?.childSortMode === "alpha" ? "alpha" :
+      parent?.childSortMode === "alpha_desc" ? "alpha_desc" :
+      "order";
+    childMapRaw.set(parentId, sortAlbumList(children, sortMode));
   }
 
   // Map → plain object (serialisierbar für Client-Komponente)

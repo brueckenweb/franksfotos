@@ -180,6 +180,7 @@ export default function FotodatenbankEingabe() {
   const [allTags,             setAllTags]             = useState<TagOption[]>([]);
   const [galerieUebernehmen,  setGalerieUebernehmen]  = useState(false);
   const [galerieAlbumId,      setGalerieAlbumId]      = useState("");
+  const [galerieTitel,        setGalerieTitel]        = useState("");
   const [galerieBeschreibung, setGalerieBeschreibung] = useState("");
   const [galeriePrivat,       setGaleriePrivat]       = useState(false);
   const [galerieGruppenIds,   setGalerieGruppenIds]   = useState<number[]>([]);
@@ -400,6 +401,7 @@ export default function FotodatenbankEingabe() {
       fd.append("basreihenfolge", form.basreihenfolge);
       fd.append("galerieUebernehmen",  String(galerieUebernehmen));
       fd.append("galerieAlbumId",      galerieAlbumId);
+      fd.append("galerieTitel",        galerieTitel);
       fd.append("galerieBeschreibung", galerieBeschreibung);
       fd.append("galeriePrivat",       String(galeriePrivat));
       fd.append("galerieGruppenIds",   JSON.stringify(galerieGruppenIds));
@@ -653,13 +655,7 @@ export default function FotodatenbankEingabe() {
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
 
-      {/* Meldungen */}
-      {successMsg && (
-        <div className="flex items-center gap-3 bg-green-900/20 border border-green-800 rounded-lg px-4 py-3 text-green-400 text-sm">
-          <CheckCircle2 className="w-5 h-5 flex-shrink-0" />
-          <span>{successMsg}</span>
-        </div>
-      )}
+      {/* Fehlermeldungen oben */}
       {submitError && (
         <div className="flex items-center gap-3 bg-red-900/20 border border-red-800 rounded-lg px-4 py-3 text-red-400 text-sm">
           <AlertCircle className="w-5 h-5 flex-shrink-0" />
@@ -974,18 +970,30 @@ export default function FotodatenbankEingabe() {
 
           {/* Aktions-Panel */}
           <div className="bg-gray-900 border border-gray-800 rounded-xl p-4">
-            <button
-              type="submit"
-              disabled={submitting || !scanData}
-              className="w-full inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-500/40 text-white px-4 py-2.5 rounded-lg font-semibold text-sm transition-colors"
-            >
-              {submitting ? (
-                <Loader2 className="w-4 h-4 animate-spin" />
-              ) : (
-                <Save className="w-4 h-4" />
-              )}
-              Eintragen
-            </button>
+            {successMsg ? (
+              <div className="flex items-center gap-2 bg-green-900/30 border border-green-700 rounded-lg px-3 py-2.5 text-green-400 text-sm">
+                <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+                <span className="leading-tight">{successMsg}</span>
+              </div>
+            ) : (
+              <button
+                type="submit"
+                disabled={submitting || !scanData}
+                className="w-full inline-flex items-center justify-center gap-2 bg-amber-500 hover:bg-amber-600 disabled:bg-amber-500/40 text-white px-4 py-2.5 rounded-lg font-semibold text-sm transition-colors"
+              >
+                {submitting ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Wird eingetragen…
+                  </>
+                ) : (
+                  <>
+                    <Save className="w-4 h-4" />
+                    Eintragen
+                  </>
+                )}
+              </button>
+            )}
           </div>
 
           {/* Fotogalerie-Panel */}
@@ -1024,7 +1032,17 @@ export default function FotodatenbankEingabe() {
                     onChange={setGalerieAlbumId} noSelectionLabel="— kein Album —" />
                 </div>
                 <div>
-                  <label className="text-gray-400 text-xs mb-1.5 block">Beschreibung</label>
+                  <label className="text-gray-400 text-xs mb-1.5 block">Titel (Galerie)</label>
+                  <input
+                    type="text"
+                    value={galerieTitel}
+                    onChange={(e) => setGalerieTitel(e.target.value)}
+                    placeholder="Optionaler Bildtitel für die Galerie…"
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-white text-sm focus:outline-none focus:border-amber-500 placeholder-gray-600"
+                  />
+                </div>
+                <div>
+                  <label className="text-gray-400 text-xs mb-1.5 block">Beschreibung (Galerie)</label>
                   <textarea value={galerieBeschreibung}
                     onChange={(e) => setGalerieBeschreibung(e.target.value)}
                     rows={2} placeholder="Optionale Beschreibung…"

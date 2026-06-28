@@ -105,6 +105,7 @@ export async function POST(request: NextRequest) {
 
   const galerieUebernehmen  = g("galerieUebernehmen") === "true";
   const galerieAlbumId      = g("galerieAlbumId") ? Number(g("galerieAlbumId")) : null;
+  const galerieTitel        = g("galerieTitel") || null;
   const galerieBeschreibung = g("galerieBeschreibung") || null;
   const galeriePrivat       = g("galeriePrivat") === "true";
 
@@ -320,7 +321,7 @@ export async function POST(request: NextRequest) {
         const [inserted] = await db.insert(photos).values({
           albumId:      galerieAlbumId,
           filename:     actualFileName,
-          title:        titel || null,
+          title:        galerieTitel || titel || null,
           description:  galerieBeschreibung,
           fileUrl,
           thumbnailUrl: thumbnailUrl ?? null,
