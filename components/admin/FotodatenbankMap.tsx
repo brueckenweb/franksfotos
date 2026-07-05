@@ -240,7 +240,11 @@ export default function FotodatenbankMap({
         )}
         <div style={{ marginTop: 6, textAlign: "center" }}>
           <a
-            href={`https://www.brueckenweb.de/de/bruecke/${b.brueckennummer}`}
+            href={
+              isWartend
+                ? `https://www.brueckenweb.de/de/bruecke/${b.bas}`
+                : `https://www.brueckenweb.de/de/bruecke/${b.brueckennummer}`
+            }
             target="_blank"
             rel="noopener noreferrer"
             style={{ color: "#2563eb", fontSize: 11 }}

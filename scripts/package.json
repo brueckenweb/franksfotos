@@ -1,6 +1,6 @@
 {
   "name": "fotodatenbank-prozessor",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "Lokaler Fotodatenbank-Prozessor – läuft auf localhost:4567",
   "type": "module",
   "scripts": {

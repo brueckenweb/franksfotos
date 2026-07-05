@@ -80,6 +80,11 @@ function setCors(res) {
   res.setHeader("Access-Control-Allow-Origin",  "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  // Erlaubt Anfragen von HTTPS-Seiten (z. B. https://www.frank-sellke.de) an diesen
+  // lokalen HTTP-Server. Chrome 104+ verlangt diesen Header bei "Private Network Access"
+  // (öffentliche HTTPS-Seite → localhost). Ohne ihn schlägt der Status-Check fehl und
+  // der Browser zeigt "Lokaler Prozessor nicht erreichbar".
+  res.setHeader("Access-Control-Allow-Private-Network", "true");
 }
 
 function sendJson(res, status, data) {

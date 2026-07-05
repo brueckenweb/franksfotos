@@ -715,15 +715,11 @@ export default function FotodatenbankEingabe() {
                 </div>
                 <div className="flex items-center gap-2 flex-shrink-0">
                   <a
-                    href={
-                      scanData?.baseName
-                        ? `${LOCAL_SERVER}/zuverarbeiten-original?baseName=${encodeURIComponent(scanData.baseName)}`
-                        : (previewUrl ?? "#")
-                    }
+                    href={previewUrl ?? "#"}
                     target="_blank"
                     rel="noopener noreferrer"
                     className="text-gray-500 hover:text-gray-300 text-xs transition-colors"
-                    title="Originalbild in voller Auflösung öffnen"
+                    title="Originalbild in voller Auflösung öffnen (3000 px Vorschau)"
                   >
                     🔍 Vollbild
                   </a>
@@ -898,6 +894,7 @@ export default function FotodatenbankEingabe() {
                       const next = !basUebernehmen;
                       basUebernehmenRef.current = next;
                       setBasUebernehmen(next);
+                      if (!next) setField("bas", "");
                     }}
                     title={
                       !form.bas && !basUebernehmen
