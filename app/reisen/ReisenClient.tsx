@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import dynamic from "next/dynamic";
-import { Plus, Globe, Map, List, X, Check, Loader2, Pencil, Trash2, MapPin, Star, Share2, Copy, ExternalLink } from "lucide-react";
+import { Plus, Globe, Map, List, X, Check, Loader2, Pencil, Trash2, MapPin, Star, Share2, Copy, ExternalLink, Camera } from "lucide-react";
 import type { VisitedCountry, CityMarker, SightMarker } from "@/components/reisen/WorldMap";
 import ReisenStats from "@/components/reisen/ReisenStats";
 import { COUNTRIES, COUNTRY_MAP } from "@/lib/reisen/countries";
@@ -12,6 +12,17 @@ const WorldMap = dynamic(() => import("@/components/reisen/WorldMap"), { ssr: fa
     <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
   </div>
 ) });
+
+// ─── Typen ────────────────────────────────────────────────────────────────────
+
+export interface FotogruppenLink {
+  id: number;
+  entityType: string;
+  entityId: number;
+  mapId: number;
+  fotogruppeId: number;
+  fotogruppeNname: string;
+}
 
 interface TravelMap {
   id: number;
@@ -24,9 +35,16 @@ interface TravelMap {
   countries: VisitedCountry[];
   cities: CityMarker[];
   sights: SightMarker[];
+  fotogruppenLinks: FotogruppenLink[];
 }
 
 interface UserOption { id: number; name: string; }
+
+interface FotogruppenSuchErgebnis {
+  idfgruppe: number;
+  name: string;
+  einaktiv: string;
+}
 
 const SIGHT_CATEGORIES = ["Museum", "Naturdenkmal", "Burg/Schloss", "Kirche/Dom", "Denkmal", "Strand", "Park", "Aussichtspunkt", "Sonstiges"];
 
@@ -51,14 +69,161 @@ type OverpassPOI = {
   tags: { name?: string; tourism?: string; historic?: string; amenity?: string };
 };
 
+// ─── Fotogruppen-Verknüpfungs-Panel ──────────────────────────────────────────
+
+function FotogruppenPanel({ mapId, entityType, entityId, links, onLinksChanged }: {
+  mapId: number;
+  entityType: "country" | "city" | "sight";
+  entityId: number;
+  links: FotogruppenLink[];
+  onLinksChanged: () => void;
+}) {
+  const [suche, setSuche] = useState("");
+  const [ergebnisse, setErgebnisse] = useState<FotogruppenSuchErgebnis[]>([]);
+  const [suchLaeuft, setSuchLaeuft] = useState(false);
+  const [showDropdown, setShowDropdown] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const suchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function handleSucheChange(val: string) {
+    setSuche(val);
+    setError(null);
+    if (suchTimer.current) clearTimeout(suchTimer.current);
+    if (val.trim().length < 2) { setErgebnisse([]); setShowDropdown(false); return; }
+    suchTimer.current = setTimeout(async () => {
+      setSuchLaeuft(true);
+      try {
+        const res = await fetch(`/api/reisen/fotogruppen-search?q=${encodeURIComponent(val)}`);
+        const data: FotogruppenSuchErgebnis[] = await res.json();
+        setErgebnisse(Array.isArray(data) ? data : []);
+        setShowDropdown(true);
+      } catch { /* ignorieren */ } finally { setSuchLaeuft(false); }
+    }, 350);
+  }
+
+  async function handleAdd(fg: FotogruppenSuchErgebnis) {
+    setShowDropdown(false);
+    setSuche("");
+    // Duplikat-Check im Frontend – nur gegen Links DIESER Entity prüfen
+    const myLinks = links.filter(l => l.entityType === entityType && l.entityId === entityId);
+    if (myLinks.some(l => l.fotogruppeId === fg.idfgruppe)) {
+      setError("Diese Fotogruppe ist bereits verknüpft.");
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/reisen/${mapId}/fotogruppen-links`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ entityType, entityId, fotogruppeId: fg.idfgruppe, fotogruppeNname: fg.name }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error ?? "Fehler"); return; }
+      onLinksChanged();
+    } finally { setSaving(false); }
+  }
+
+  async function handleRemove(linkId: number) {
+    setSaving(true);
+    setError(null);
+    try {
+      await fetch(`/api/reisen/${mapId}/fotogruppen-links`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id: linkId }),
+      });
+      onLinksChanged();
+    } finally { setSaving(false); }
+  }
+
+  const myLinks = links.filter(l => l.entityType === entityType && l.entityId === entityId);
+
+  return (
+    <div className="border-t border-gray-800 pt-3 mt-1">
+      <label className="block text-xs text-amber-400 font-medium mb-2 flex items-center gap-1.5">
+        <Camera className="w-3.5 h-3.5" />Fotogruppen-Verknüpfungen
+      </label>
+
+      {/* Bestehende Links */}
+      {myLinks.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 mb-2">
+          {myLinks.map(link => (
+            <div key={link.id} className="flex items-center gap-1 bg-amber-900/30 border border-amber-700/50 rounded-full px-2 py-0.5">
+              <span className="text-amber-300 text-xs truncate max-w-[160px]" title={link.fotogruppeNname}>
+                {link.fotogruppeNname}
+              </span>
+              <button
+                type="button"
+                onClick={() => handleRemove(link.id)}
+                disabled={saving}
+                className="text-amber-500 hover:text-red-400 transition-colors"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Suchfeld */}
+      <div className="relative">
+        <div className="flex gap-1.5">
+          <input
+            type="text"
+            value={suche}
+            onChange={e => handleSucheChange(e.target.value)}
+            onBlur={() => setTimeout(() => setShowDropdown(false), 150)}
+            onFocus={() => ergebnisse.length > 0 && setShowDropdown(true)}
+            placeholder="Fotogruppe suchen…"
+            className="flex-1 bg-gray-800 border border-gray-700 text-white rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-amber-500"
+          />
+          {suchLaeuft && <Loader2 className="w-4 h-4 text-amber-400 animate-spin self-center" />}
+        </div>
+
+        {showDropdown && ergebnisse.length > 0 && (
+          <div className="absolute z-50 top-full left-0 right-0 bg-gray-800 border border-gray-600 rounded-lg mt-0.5 max-h-40 overflow-y-auto shadow-2xl">
+            {ergebnisse.map(fg => {
+              const already = myLinks.some(l => l.fotogruppeId === fg.idfgruppe);
+              return (
+                <button
+                  key={fg.idfgruppe}
+                  type="button"
+                  onMouseDown={e => { e.preventDefault(); if (!already) handleAdd(fg); }}
+                  disabled={already}
+                  className={`w-full text-left px-3 py-1.5 border-b border-gray-700/50 last:border-0 flex items-center justify-between gap-2 ${
+                    already ? "opacity-40 cursor-not-allowed" : "hover:bg-gray-700"
+                  }`}
+                >
+                  <span className="text-white text-xs truncate">{fg.name}</span>
+                  <span className={`text-xs shrink-0 ${fg.einaktiv === "ja" ? "text-green-400" : "text-gray-500"}`}>
+                    {fg.einaktiv === "ja" ? "aktiv" : "inaktiv"}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {error && <p className="text-red-400 text-xs mt-1">{error}</p>}
+    </div>
+  );
+}
+
 // ─── CountryModal ──────────────────────────────────────────────────────────
 
-function CountryModal({ code, name, existing, partnerName, onSave, onDelete, onClose }: {
+function CountryModal({ code, name, existing, partnerName, mapId, fotogruppenLinks, isFrank, onSave, onDelete, onClose, onLinksChanged }: {
   code: string; name: string; existing: VisitedCountry | null;
   partnerName: string | null;
+  mapId: number;
+  fotogruppenLinks: FotogruppenLink[];
+  isFrank: boolean;
   onSave: (data: { visitedBy: string; visitedAt: string; notes: string }) => void;
   onDelete: () => void;
   onClose: () => void;
+  onLinksChanged: () => void;
 }) {
   const [visitedBy, setVisitedBy] = useState(existing?.visitedBy ?? "both");
   const [visitedAt, setVisitedAt] = useState(existing?.visitedAt?.substring(0, 10) ?? "");
@@ -73,7 +238,7 @@ function CountryModal({ code, name, existing, partnerName, onSave, onDelete, onC
 
   return (
     <div className="fixed inset-0 bg-black/60 z-[2000] flex items-center justify-center p-4">
-      <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-md shadow-2xl">
+      <div className="bg-gray-900 border border-gray-700 rounded-xl w-full max-w-md shadow-2xl max-h-[90vh] overflow-y-auto">
         <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
           <div>
             <h3 className="text-white font-semibold text-lg">{name}</h3>
@@ -114,6 +279,22 @@ function CountryModal({ code, name, existing, partnerName, onSave, onDelete, onC
               className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500 resize-none"
               placeholder="Kurze Notiz..." maxLength={500} />
           </div>
+
+          {/* Fotogruppen-Panel (nur für Frank, nur wenn Land bereits existiert) */}
+          {isFrank && existing && (
+            <FotogruppenPanel
+              mapId={mapId}
+              entityType="country"
+              entityId={existing.id}
+              links={fotogruppenLinks}
+              onLinksChanged={onLinksChanged}
+            />
+          )}
+          {isFrank && !existing && (
+            <p className="text-xs text-gray-500 border-t border-gray-800 pt-3 mt-1">
+              💡 Fotogruppen können nach dem ersten Speichern verknüpft werden.
+            </p>
+          )}
         </div>
         <div className="px-6 py-4 border-t border-gray-800 flex items-center justify-between">
           {existing ? (
@@ -137,7 +318,7 @@ function CountryModal({ code, name, existing, partnerName, onSave, onDelete, onC
 
 // ─── CityOrSightModal (Hinzufügen & Bearbeiten) ────────────────────────────
 
-function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initialLng, existing, onSaved, onClose }: {
+function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initialLng, existing, fotogruppenLinks, isFrank, onSaved, onClose, onLinksChanged }: {
   type: "city" | "sight";
   mapId: number;
   cities: CityMarker[];
@@ -145,8 +326,11 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
   initialLat?: number;
   initialLng?: number;
   existing?: CityMarker | SightMarker | null;
+  fotogruppenLinks: FotogruppenLink[];
+  isFrank: boolean;
   onSaved: () => void;
   onClose: () => void;
+  onLinksChanged: () => void;
 }) {
   const existingCategory = existing && "category" in existing ? existing.category : "Sonstiges";
   const existingCityId   = existing && "cityId"   in existing ? String(existing.cityId ?? "") : "";
@@ -183,7 +367,6 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
   const isEdit      = !!existing;
   const countryName = COUNTRY_MAP.get(countryCode)?.name ?? "";
 
-  /** Reverse Geocoding bei Kartenklick: Stadtname automatisch ermitteln */
   useEffect(() => {
     if (!existing && initialLat !== undefined && initialLng !== undefined && !name) {
       setGeoLoading(true);
@@ -192,12 +375,7 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
         .then((r) => r.json())
         .then((data) => {
           if (data?.address) {
-            const cityName =
-              data.address.city ??
-              data.address.town ??
-              data.address.village ??
-              data.address.county ??
-              "";
+            const cityName = data.address.city ?? data.address.town ?? data.address.village ?? data.address.county ?? "";
             if (cityName) {
               setName(cityName);
               const cc = data.address.country_code?.toUpperCase();
@@ -209,11 +387,9 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
         .catch(() => {})
         .finally(() => setGeoLoading(false));
     }
-    // Nur beim ersten Öffnen ausführen
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /** Debounced Autocomplete: holt Vorschläge von Nominatim während der Eingabe */
   function handleNameChange(value: string) {
     setName(value);
     setGeoMsg(null);
@@ -231,13 +407,8 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
     }, 400);
   }
 
-  /** Vorschlag aus der Dropdown-Liste auswählen → füllt alle Felder */
   function pickSuggestion(hit: NominatimResult) {
-    const primaryName =
-      hit.address?.city ??
-      hit.address?.town ??
-      hit.address?.village ??
-      hit.display_name.split(",")[0].trim();
+    const primaryName = hit.address?.city ?? hit.address?.town ?? hit.address?.village ?? hit.display_name.split(",")[0].trim();
     setName(primaryName);
     setLat(parseFloat(hit.lat).toFixed(5));
     setLng(parseFloat(hit.lon).toFixed(5));
@@ -248,21 +419,15 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
     setSuggestions([]);
   }
 
-  /** Geocoding via Nominatim – sucht Stadtname und füllt lat/lng/Land */
   async function searchGeo() {
     const q = name.trim();
     if (!q) { setGeoMsg({ type: "err", text: "Bitte zuerst einen Namen eingeben." }); return; }
-    setGeoLoading(true);
-    setGeoMsg(null);
-    setShowSuggestions(false);
+    setGeoLoading(true); setGeoMsg(null); setShowSuggestions(false);
     try {
       const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&addressdetails=1&accept-language=de`;
       const res = await fetch(url, { headers: { "User-Agent": "FranksFotos/1.0" } });
       const data: NominatimResult[] = await res.json();
-      if (!data || data.length === 0) {
-        setGeoMsg({ type: "err", text: `„${q}" wurde nicht gefunden.` });
-        return;
-      }
+      if (!data || data.length === 0) { setGeoMsg({ type: "err", text: `„${q}" wurde nicht gefunden.` }); return; }
       const hit = data[0];
       setLat(parseFloat(hit.lat).toFixed(5));
       setLng(parseFloat(hit.lon).toFixed(5));
@@ -271,23 +436,16 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
       setGeoMsg({ type: "ok", text: `✓ ${hit.display_name}` });
     } catch {
       setGeoMsg({ type: "err", text: "Geocoding-Fehler. Bitte Koordinaten manuell eingeben." });
-    } finally {
-      setGeoLoading(false);
-    }
+    } finally { setGeoLoading(false); }
   }
 
   async function handleSave() {
     if (!name.trim()) { setError("Name ist erforderlich"); return; }
-    setSaving(true);
-    setError(null);
+    setSaving(true); setError(null);
     try {
       const url = isEdit
-        ? (type === "city"
-            ? `/api/reisen/${mapId}/cities/${existing!.id}`
-            : `/api/reisen/${mapId}/sights/${existing!.id}`)
-        : (type === "city"
-            ? `/api/reisen/${mapId}/cities`
-            : `/api/reisen/${mapId}/sights`);
+        ? (type === "city" ? `/api/reisen/${mapId}/cities/${existing!.id}` : `/api/reisen/${mapId}/sights/${existing!.id}`)
+        : (type === "city" ? `/api/reisen/${mapId}/cities` : `/api/reisen/${mapId}/sights`);
       const method = isEdit ? "PUT" : "POST";
       const body = type === "city"
         ? { name, countryCode, countryName, lat: lat || null, lng: lng || null, visitedBy, visitedAt: visitedAt || null, notes: notes || null }
@@ -295,12 +453,9 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
       const res = await fetch(url, { method, headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
       if (!res.ok) { const d = await res.json(); setError(d.error ?? "Fehler"); return; }
       onSaved();
-    } finally {
-      setSaving(false);
-    }
+    } finally { setSaving(false); }
   }
 
-  /** Kategorie aus Overpass-Tags ableiten */
   function tagToCategory(tags: OverpassPOI["tags"]): string {
     if (tags.tourism === "museum" || tags.tourism === "gallery")      return "Museum";
     if (tags.tourism === "viewpoint")                                  return "Aussichtspunkt";
@@ -309,11 +464,9 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
     if (tags.historic === "church" || tags.historic === "cathedral")   return "Kirche/Dom";
     if (tags.historic === "monument" || tags.historic === "memorial") return "Denkmal";
     if (tags.tourism === "theme_park" || tags.tourism === "zoo")       return "Park";
-    if (tags.tourism === "attraction")                                  return "Sonstiges";
     return "Sonstiges";
   }
 
-  /** POI aus Vorschlagsliste auswählen → füllt Name, Koordinaten, Kategorie */
   function pickPoiSuggestion(poi: OverpassPOI) {
     setName(poi.tags.name ?? "");
     setLat(poi.lat.toFixed(5));
@@ -323,30 +476,19 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
     setShowPoiList(false);
   }
 
-  /** Lädt Sehenswürdigkeiten aus der Umgebung via Overpass-API */
   async function loadPoiSuggestions() {
-    // Koordinaten bestimmen (lat/lng-Felder oder ausgewählte Stadt)
     let qLat: number | null = null;
     let qLng: number | null = null;
-    if (lat && lng) {
-      qLat = parseFloat(lat);
-      qLng = parseFloat(lng);
-    } else if (cityId) {
+    if (lat && lng) { qLat = parseFloat(lat); qLng = parseFloat(lng); }
+    else if (cityId) {
       const city = cities.find((c) => String(c.id) === cityId);
-      if (city?.lat && city?.lng) {
-        qLat = parseFloat(city.lat);
-        qLng = parseFloat(city.lng);
-      }
+      if (city?.lat && city?.lng) { qLat = parseFloat(city.lat); qLng = parseFloat(city.lng); }
     }
     if (!qLat || !qLng || isNaN(qLat) || isNaN(qLng)) {
       setPoiError("Bitte zuerst eine Stadt auswählen oder Koordinaten eingeben.");
-      setShowPoiList(true);
-      return;
+      setShowPoiList(true); return;
     }
-    setPoiLoading(true);
-    setPoiError(null);
-    setShowPoiList(true);
-    setPoiSuggestions([]);
+    setPoiLoading(true); setPoiError(null); setShowPoiList(true); setPoiSuggestions([]);
     try {
       const q = `[out:json][timeout:15];(node["tourism"~"^(attraction|museum|viewpoint|artwork|gallery|theme_park|zoo)$"]["name"](around:25000,${qLat},${qLng});node["historic"~"^(castle|monument|memorial|ruins|church|cathedral)$"]["name"](around:25000,${qLat},${qLng}););out body 20;`;
       const res = await fetch(`https://overpass-api.de/api/interpreter?data=${encodeURIComponent(q)}`);
@@ -354,22 +496,19 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
       const pois: OverpassPOI[] = (data.elements ?? []).filter((e: OverpassPOI) => e.tags?.name);
       setPoiSuggestions(pois.slice(0, 20));
       if (pois.length === 0) setPoiError("Keine Sehenswürdigkeiten in der Nähe gefunden.");
-    } catch {
-      setPoiError("Vorschläge konnten nicht geladen werden (Overpass-API).");
-    } finally {
-      setPoiLoading(false);
-    }
+    } catch { setPoiError("Vorschläge konnten nicht geladen werden (Overpass-API)."); }
+    finally { setPoiLoading(false); }
   }
 
   async function handleDelete() {
     if (!existing) return;
     setSaving(true);
-    const url = type === "city"
-      ? `/api/reisen/${mapId}/cities/${existing.id}`
-      : `/api/reisen/${mapId}/sights/${existing.id}`;
+    const url = type === "city" ? `/api/reisen/${mapId}/cities/${existing.id}` : `/api/reisen/${mapId}/sights/${existing.id}`;
     await fetch(url, { method: "DELETE" });
     onSaved();
   }
+
+  const entityType = type === "city" ? "city" : "sight";
 
   return (
     <div className="fixed inset-0 bg-black/60 z-[2000] flex items-center justify-center p-4">
@@ -392,40 +531,26 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
                 <input
                   value={name}
                   onChange={(e) => handleNameChange(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") { setShowSuggestions(false); searchGeo(); }
-                    if (e.key === "Escape") setShowSuggestions(false);
-                  }}
+                  onKeyDown={(e) => { if (e.key === "Enter") { setShowSuggestions(false); searchGeo(); } if (e.key === "Escape") setShowSuggestions(false); }}
                   onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
                   onFocus={() => name.trim().length >= 2 && suggestions.length > 0 && setShowSuggestions(true)}
                   className="flex-1 bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500"
                   placeholder={type === "city" ? "z.B. Paris (Vorschläge beim Tippen)" : "z.B. Eiffelturm"}
                 />
-                <button
-                  type="button"
-                  onClick={searchGeo}
-                  disabled={geoLoading}
-                  title="Koordinaten per Name suchen (Nominatim/OSM)"
-                  className="flex items-center gap-1 bg-sky-700 hover:bg-sky-600 disabled:bg-sky-900 text-white px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap"
-                >
+                <button type="button" onClick={searchGeo} disabled={geoLoading}
+                  className="flex items-center gap-1 bg-sky-700 hover:bg-sky-600 disabled:bg-sky-900 text-white px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap">
                   {geoLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
                   Suchen
                 </button>
               </div>
-
-              {/* Autocomplete-Vorschlagsliste */}
               {showSuggestions && suggestions.length > 0 && (
                 <div className="absolute z-50 top-full left-0 right-0 bg-gray-800 border border-gray-600 rounded-lg mt-1 max-h-52 overflow-y-auto shadow-2xl">
                   {suggestions.map((hit, i) => {
                     const primary = hit.address?.city ?? hit.address?.town ?? hit.address?.village ?? hit.display_name.split(",")[0].trim();
                     const secondary = hit.display_name.split(",").slice(1).slice(0, 2).join(",").trim();
                     return (
-                      <button
-                        key={i}
-                        type="button"
-                        onMouseDown={(e) => { e.preventDefault(); pickSuggestion(hit); }}
-                        className="w-full text-left px-3 py-2 hover:bg-gray-700 border-b border-gray-700/50 last:border-0 flex flex-col gap-0.5"
-                      >
+                      <button key={i} type="button" onMouseDown={(e) => { e.preventDefault(); pickSuggestion(hit); }}
+                        className="w-full text-left px-3 py-2 hover:bg-gray-700 border-b border-gray-700/50 last:border-0 flex flex-col gap-0.5">
                         <span className="text-white text-sm font-medium truncate">{primary}</span>
                         {secondary && <span className="text-gray-400 text-xs truncate">{secondary}</span>}
                       </button>
@@ -436,7 +561,6 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
             </div>
           </div>
 
-          {/* Kategorie & Stadt (nur für Sehenswürdigkeiten) */}
           {type === "sight" && (
             <>
               <div>
@@ -454,38 +578,26 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
                   </select>
                 </div>
               )}
-
-              {/* ── Overpass POI-Vorschläge ── */}
               <div className="rounded-lg border border-yellow-700/40 bg-yellow-900/10 p-3">
                 <div className="flex items-center justify-between mb-1">
                   <span className="text-xs text-yellow-400 font-medium flex items-center gap-1">
                     <Star className="w-3 h-3" />Vorschläge aus der Umgebung
                   </span>
-                  <button
-                    type="button"
-                    onClick={loadPoiSuggestions}
-                    disabled={poiLoading}
-                    className="text-xs text-yellow-300 hover:text-yellow-200 disabled:opacity-50 flex items-center gap-1 bg-yellow-800/40 hover:bg-yellow-700/40 px-2 py-1 rounded-md transition-colors"
-                  >
+                  <button type="button" onClick={loadPoiSuggestions} disabled={poiLoading}
+                    className="text-xs text-yellow-300 hover:text-yellow-200 disabled:opacity-50 flex items-center gap-1 bg-yellow-800/40 hover:bg-yellow-700/40 px-2 py-1 rounded-md transition-colors">
                     {poiLoading ? <Loader2 className="w-3 h-3 animate-spin" /> : <MapPin className="w-3 h-3" />}
                     {poiLoading ? "Lade…" : "Laden"}
                   </button>
                 </div>
-                <p className="text-xs text-gray-500 mb-2">
-                  Koordinaten oder Stadt wählen, dann Vorschläge laden.
-                </p>
+                <p className="text-xs text-gray-500 mb-2">Koordinaten oder Stadt wählen, dann Vorschläge laden.</p>
                 {poiError && <p className="text-xs text-red-400 mb-1">{poiError}</p>}
                 {showPoiList && poiSuggestions.length > 0 && (
                   <div className="bg-gray-800 border border-gray-600 rounded-lg max-h-44 overflow-y-auto">
                     {poiSuggestions.map((poi) => {
                       const typeLabel = poi.tags.tourism ?? poi.tags.historic ?? poi.tags.amenity ?? "";
                       return (
-                        <button
-                          key={poi.id}
-                          type="button"
-                          onClick={() => pickPoiSuggestion(poi)}
-                          className="w-full text-left px-3 py-2 hover:bg-gray-700 border-b border-gray-700/50 last:border-0 flex items-center justify-between gap-2"
-                        >
+                        <button key={poi.id} type="button" onClick={() => pickPoiSuggestion(poi)}
+                          className="w-full text-left px-3 py-2 hover:bg-gray-700 border-b border-gray-700/50 last:border-0 flex items-center justify-between gap-2">
                           <span className="text-white text-sm truncate">{poi.tags.name}</span>
                           <span className="text-gray-400 text-xs whitespace-nowrap shrink-0">{typeLabel}</span>
                         </button>
@@ -497,7 +609,6 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
             </>
           )}
 
-          {/* Land */}
           <div>
             <label className="block text-xs text-gray-400 mb-1">Land</label>
             <select value={countryCode} onChange={(e) => setCC(e.target.value)} className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500">
@@ -507,7 +618,6 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
             </select>
           </div>
 
-          {/* Koordinaten */}
           <div className="grid grid-cols-2 gap-2">
             <div>
               <label className="block text-xs text-gray-400 mb-1">Breite (lat)</label>
@@ -525,7 +635,6 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
             </p>
           )}
 
-          {/* Bereist von */}
           <div>
             <label className="block text-xs text-gray-400 mb-1">Bereist von</label>
             <div className="flex gap-2">
@@ -538,17 +647,31 @@ function CityOrSightModal({ type, mapId, cities, partnerName, initialLat, initia
             </div>
           </div>
 
-          {/* Datum */}
           <div>
             <label className="block text-xs text-gray-400 mb-1">Datum</label>
             <input type="date" value={visitedAt} onChange={(e) => setVisitedAt(e.target.value)} className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500" />
           </div>
 
-          {/* Notiz */}
           <div>
             <label className="block text-xs text-gray-400 mb-1">Notiz</label>
             <textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} className="w-full bg-gray-800 border border-gray-700 text-white rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-amber-500 resize-none" maxLength={500} />
           </div>
+
+          {/* Fotogruppen-Panel (nur für Frank, nur bei bestehenden Einträgen) */}
+          {isFrank && isEdit && existing && (
+            <FotogruppenPanel
+              mapId={mapId}
+              entityType={entityType}
+              entityId={existing.id}
+              links={fotogruppenLinks}
+              onLinksChanged={onLinksChanged}
+            />
+          )}
+          {isFrank && !isEdit && (
+            <p className="text-xs text-gray-500 border-t border-gray-800 pt-3">
+              💡 Fotogruppen können nach dem ersten Speichern verknüpft werden.
+            </p>
+          )}
 
           {error && <p className="text-red-400 text-xs">{error}</p>}
         </div>
@@ -585,8 +708,7 @@ function NeueKarteModal({ users, onCreated, onClose }: { users: UserOption[]; on
 
   async function handleCreate() {
     if (!name.trim()) { setError("Name erforderlich"); return; }
-    setSaving(true);
-    setError(null);
+    setSaving(true); setError(null);
     try {
       const res = await fetch("/api/reisen", {
         method: "POST",
@@ -642,7 +764,7 @@ function NeueKarteModal({ users, onCreated, onClose }: { users: UserOption[]; on
 
 // ─── Hauptkomponente ───────────────────────────────────────────────────────
 
-export default function ReisenClient({ currentUserId }: { currentUserId: number }) {
+export default function ReisenClient({ currentUserId, isFrank }: { currentUserId: number; isFrank: boolean }) {
   const [maps, setMaps]       = useState<TravelMap[]>([]);
   const [activeMap, setActive] = useState<TravelMap | null>(null);
   const [allUsers, setAllUsers] = useState<UserOption[]>([]);
@@ -659,7 +781,6 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
   } | null>(null);
   const [neueKarteModal, setNeueKarteModal] = useState(false);
 
-  // Welche Karte ist aktiv: Länder oder Städte/Sehenswürdigkeiten
   const [mapView, setMapView] = useState<"laender" | "staedte">("laender");
 
   // Formular-State
@@ -705,7 +826,6 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
     setActive(detail);
   }
 
-  // Land-Klick → Modal öffnen
   function handleCountryClick(code: string, name: string, existing: VisitedCountry | null) {
     setCountryModal({ code, name, existing });
   }
@@ -732,15 +852,8 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
     loadMaps();
   }
 
-  // Stadt-Marker angeklickt → Edit-Modal
-  function handleCityClick(city: CityMarker) {
-    setCityModal({ type: "city", existing: city });
-  }
-
-  // Sehenswürdigkeits-Marker angeklickt → Edit-Modal
-  function handleSightClick(sight: SightMarker) {
-    setCityModal({ type: "sight", existing: sight });
-  }
+  function handleCityClick(city: CityMarker) { setCityModal({ type: "city", existing: city }); }
+  function handleSightClick(sight: SightMarker) { setCityModal({ type: "sight", existing: sight }); }
 
   async function handleFormularSave() {
     if (!activeMap) return;
@@ -768,6 +881,9 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
     loadMaps();
   }
 
+  // Fotogruppen-Links für aktuellen Eintrag ermitteln
+  const fotogruppenLinks = activeMap?.fotogruppenLinks ?? [];
+
   if (loading && !activeMap) {
     return (
       <div className="flex items-center justify-center py-20">
@@ -791,22 +907,16 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
         </div>
         <div className="flex items-center gap-2">
           {activeMap && activeMap.userId === currentUserId && (
-            <button
-              onClick={() => setShowShare((v) => !v)}
+            <button onClick={() => setShowShare((v) => !v)}
               className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                showShare
-                  ? "bg-green-600 border-green-500 text-white"
-                  : "bg-gray-800 border-gray-700 text-gray-300 hover:border-green-500 hover:text-green-400"
-              }`}
-            >
-              <Share2 className="w-4 h-4" />
-              Veröffentlichen
+                showShare ? "bg-green-600 border-green-500 text-white" : "bg-gray-800 border-gray-700 text-gray-300 hover:border-green-500 hover:text-green-400"
+              }`}>
+              <Share2 className="w-4 h-4" />Veröffentlichen
             </button>
           )}
           <button onClick={() => setNeueKarteModal(true)}
             className="flex items-center gap-2 bg-amber-500 hover:bg-amber-400 text-white px-4 py-2 rounded-lg text-sm font-medium">
-            <Plus className="w-4 h-4" />
-            Neue Karte
+            <Plus className="w-4 h-4" />Neue Karte
           </button>
         </div>
       </div>
@@ -818,30 +928,18 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
             <Share2 className="w-5 h-5 text-green-400 mt-0.5 flex-shrink-0" />
             <div className="flex-1 min-w-0">
               <p className="text-green-300 text-sm font-medium mb-1">Öffentliche Karte teilen</p>
-              <p className="text-gray-400 text-xs mb-3">
-                Diese URL zeigt deine bereisten Länder ohne Login – perfekt für Social Media.
-              </p>
+              <p className="text-gray-400 text-xs mb-3">Diese URL zeigt deine bereisten Länder ohne Login – perfekt für Social Media.</p>
               <div className="flex items-center gap-2">
                 <code className="flex-1 bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-sm text-amber-300 truncate">
                   {typeof window !== "undefined" ? `${window.location.origin}/weltreise/${activeMap.id}` : `/weltreise/${activeMap.id}`}
                 </code>
-                <button
-                  onClick={handleCopy}
-                  title="URL kopieren"
-                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    copied ? "bg-green-600 text-white" : "bg-gray-700 hover:bg-gray-600 text-gray-300"
-                  }`}
-                >
+                <button onClick={handleCopy} title="URL kopieren"
+                  className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${copied ? "bg-green-600 text-white" : "bg-gray-700 hover:bg-gray-600 text-gray-300"}`}>
                   {copied ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
                   {copied ? "Kopiert!" : "Kopieren"}
                 </button>
-                <a
-                  href={`/weltreise/${activeMap.id}`}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors"
-                  title="Seite öffnen"
-                >
+                <a href={`/weltreise/${activeMap.id}`} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-sm font-medium bg-gray-700 hover:bg-gray-600 text-gray-300 transition-colors" title="Seite öffnen">
                   <ExternalLink className="w-4 h-4" />
                 </a>
               </div>
@@ -850,7 +948,7 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
         </div>
       )}
 
-      {/* Karten-Auswahl (falls mehrere) */}
+      {/* Karten-Auswahl */}
       {maps.length > 1 && (
         <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
           {maps.map((m) => (
@@ -865,7 +963,6 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
       )}
 
       {!activeMap ? (
-        /* Keine Karte */
         <div className="text-center py-20 bg-gray-900 border border-gray-800 rounded-xl">
           <Globe className="w-16 h-16 text-gray-700 mx-auto mb-4" />
           <h2 className="text-xl font-semibold text-gray-400 mb-2">Noch keine Reisekarte</h2>
@@ -892,53 +989,35 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
           {/* Tab: Karte */}
           {activeTab === "karte" && (
             <div>
-              {/* Karten-Modus-Toggle + Toolbar */}
               <div className="flex items-center gap-2 mb-3 flex-wrap">
                 <div className="flex bg-gray-800 border border-gray-700 rounded-lg p-0.5 gap-0.5">
-                  <button
-                    onClick={() => setMapView("laender")}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                      mapView === "laender" ? "bg-amber-500 text-white" : "text-gray-400 hover:text-white"
-                    }`}
-                  >
+                  <button onClick={() => setMapView("laender")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${mapView === "laender" ? "bg-amber-500 text-white" : "text-gray-400 hover:text-white"}`}>
                     <Globe className="w-3.5 h-3.5" />Länderkarte
                   </button>
-                  <button
-                    onClick={() => setMapView("staedte")}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${
-                      mapView === "staedte" ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"
-                    }`}
-                  >
+                  <button onClick={() => setMapView("staedte")}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-colors ${mapView === "staedte" ? "bg-purple-600 text-white" : "text-gray-400 hover:text-white"}`}>
                     <MapPin className="w-3.5 h-3.5" />Städte & Sehensw.
                   </button>
                 </div>
-
                 {mapView === "laender" && (
                   <span className="text-xs text-gray-500">Klicke auf ein Land, um es als bereist zu markieren.</span>
                 )}
-
                 {mapView === "staedte" && (
                   <>
-                    <span className="text-xs text-gray-400 hidden sm:block">
-                      📍 Karte klicken = Stadt hinzufügen · Marker klicken = bearbeiten
-                    </span>
-                    <button
-                      onClick={() => setCityModal({ type: "city" })}
-                      className="ml-auto flex items-center gap-1 bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium"
-                    >
+                    <span className="text-xs text-gray-400 hidden sm:block">📍 Karte klicken = Stadt hinzufügen · Marker klicken = bearbeiten</span>
+                    <button onClick={() => setCityModal({ type: "city" })}
+                      className="ml-auto flex items-center gap-1 bg-purple-600 hover:bg-purple-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium">
                       <MapPin className="w-3.5 h-3.5" />Stadt hinzufügen
                     </button>
-                    <button
-                      onClick={() => setCityModal({ type: "sight" })}
-                      className="flex items-center gap-1 bg-yellow-600 hover:bg-yellow-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium"
-                    >
+                    <button onClick={() => setCityModal({ type: "sight" })}
+                      className="flex items-center gap-1 bg-yellow-600 hover:bg-yellow-500 text-white px-3 py-1.5 rounded-lg text-xs font-medium">
                       <Star className="w-3.5 h-3.5" />Sehenswürdigkeit
                     </button>
                   </>
                 )}
               </div>
 
-              {/* Länderkarte: bereiste Länder eingefärbt */}
               {mapView === "laender" && (
                 <WorldMap
                   mode="laender"
@@ -948,12 +1027,11 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
                   ownerName={activeMap.ownerName}
                   partnerName={activeMap.partnerName}
                   readOnly={false}
+                  fotogruppenLinks={fotogruppenLinks}
                   onCountryClick={handleCountryClick}
                   onMapClick={() => {}}
                 />
               )}
-
-              {/* Städtekarte: helle Karte, anklickbare Marker, Kartenklick = Stadt hinzufügen */}
               {mapView === "staedte" && (
                 <WorldMap
                   mode="staedte"
@@ -963,6 +1041,7 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
                   ownerName={activeMap.ownerName}
                   partnerName={activeMap.partnerName}
                   readOnly={false}
+                  fotogruppenLinks={fotogruppenLinks}
                   onCountryClick={() => {}}
                   onMapClick={(lat, lng) => setCityModal({ type: "city", lat, lng })}
                   onCityClick={handleCityClick}
@@ -1026,7 +1105,6 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
                 </button>
               </div>
 
-              {/* Stadt / Sehenswürdigkeit Buttons */}
               <div className="mt-6 grid grid-cols-2 gap-3">
                 <button onClick={() => setCityModal({ type: "city" })}
                   className="flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-500 text-white px-4 py-2.5 rounded-lg text-sm font-medium">
@@ -1053,23 +1131,39 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
                   <p className="px-5 py-6 text-gray-500 text-sm text-center">Noch keine Länder eingetragen.</p>
                 ) : (
                   <div className="divide-y divide-gray-800/60">
-                    {activeMap.countries.sort((a, b) => a.countryName.localeCompare(b.countryName, "de")).map((c) => (
-                      <div key={c.id} className="px-5 py-3 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <span className={`w-2.5 h-2.5 rounded-full ${c.visitedBy === "both" ? "bg-green-500" : c.visitedBy === "user2" ? "bg-orange-500" : "bg-blue-500"}`} />
-                          <div>
-                            <span className="text-white text-sm">{c.countryName}</span>
-                            {c.visitedAt && <span className="text-gray-500 text-xs ml-2">{new Date(c.visitedAt).toLocaleDateString("de-DE")}</span>}
+                    {activeMap.countries.sort((a, b) => a.countryName.localeCompare(b.countryName, "de")).map((c) => {
+                      const countryLinks = fotogruppenLinks.filter(l => l.entityType === "country" && l.entityId === c.id);
+                      return (
+                        <div key={c.id} className="px-5 py-3 flex items-center justify-between">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${c.visitedBy === "both" ? "bg-green-500" : c.visitedBy === "user2" ? "bg-orange-500" : "bg-blue-500"}`} />
+                            <div className="min-w-0">
+                              <span className="text-white text-sm">{c.countryName}</span>
+                              {c.visitedAt && <span className="text-gray-500 text-xs ml-2">{new Date(c.visitedAt).toLocaleDateString("de-DE")}</span>}
+                              {countryLinks.length > 0 && (
+                                <span className="ml-2 text-amber-400 text-xs" title={countryLinks.map(l => l.fotogruppeNname).join(", ")}>
+                                  <Camera className="w-3 h-3 inline" /> {countryLinks.length}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-1.5 flex-shrink-0 ml-2">
+                            {isFrank && (
+                              <button onClick={() => setCountryModal({ code: c.countryCode, name: c.countryName, existing: c })}
+                                className="text-gray-600 hover:text-amber-400 transition-colors">
+                                <Pencil className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+                            <button onClick={async () => {
+                              await fetch(`/api/reisen/${activeMap.id}/countries`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ countryCode: c.countryCode }) });
+                              loadMaps();
+                            }} className="text-gray-600 hover:text-red-400 transition-colors">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
-                        <button onClick={async () => {
-                          await fetch(`/api/reisen/${activeMap.id}/countries`, { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ countryCode: c.countryCode }) });
-                          loadMaps();
-                        }} className="text-gray-600 hover:text-red-400 transition-colors">
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1090,29 +1184,34 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
                   <p className="px-5 py-6 text-gray-500 text-sm text-center">Noch keine Städte eingetragen.</p>
                 ) : (
                   <div className="divide-y divide-gray-800/60">
-                    {activeMap.cities.map((c) => (
-                      <div key={c.id} className="px-5 py-3 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <span className={`w-2.5 h-2.5 rounded-full ${c.visitedBy === "both" ? "bg-green-500" : c.visitedBy === "user2" ? "bg-orange-500" : "bg-blue-500"}`} />
-                          <div>
-                            <span className="text-white text-sm">{c.name}</span>
-                            <span className="text-gray-500 text-xs ml-2">{COUNTRY_MAP.get(c.countryCode)?.name ?? c.countryCode}</span>
-                            {c.lat && c.lng && (
-                              <span className="text-gray-600 text-xs ml-2">📍</span>
-                            )}
+                    {activeMap.cities.map((c) => {
+                      const cityLinks = fotogruppenLinks.filter(l => l.entityType === "city" && l.entityId === c.id);
+                      return (
+                        <div key={c.id} className="px-5 py-3 flex items-center justify-between">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${c.visitedBy === "both" ? "bg-green-500" : c.visitedBy === "user2" ? "bg-orange-500" : "bg-blue-500"}`} />
+                            <div className="min-w-0">
+                              <span className="text-white text-sm">{c.name}</span>
+                              <span className="text-gray-500 text-xs ml-2">{COUNTRY_MAP.get(c.countryCode)?.name ?? c.countryCode}</span>
+                              {c.lat && c.lng && <span className="text-gray-600 text-xs ml-2">📍</span>}
+                              {cityLinks.length > 0 && (
+                                <span className="ml-2 text-amber-400 text-xs" title={cityLinks.map(l => l.fotogruppeNname).join(", ")}>
+                                  <Camera className="w-3 h-3 inline" /> {cityLinks.length}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                            <button onClick={() => setCityModal({ type: "city", existing: c })} className="text-gray-600 hover:text-amber-400 transition-colors">
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={() => deleteCity(c.id)} className="text-gray-600 hover:text-red-400 transition-colors">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => setCityModal({ type: "city", existing: c })}
-                            className="text-gray-600 hover:text-amber-400 transition-colors">
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => deleteCity(c.id)} className="text-gray-600 hover:text-red-400 transition-colors">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1133,29 +1232,34 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
                   <p className="px-5 py-6 text-gray-500 text-sm text-center">Noch keine Sehenswürdigkeiten eingetragen.</p>
                 ) : (
                   <div className="divide-y divide-gray-800/60">
-                    {activeMap.sights.map((s) => (
-                      <div key={s.id} className="px-5 py-3 flex items-center justify-between">
-                        <div className="flex items-center gap-3">
-                          <span className={`w-2.5 h-2.5 rounded-full ${s.visitedBy === "both" ? "bg-green-500" : s.visitedBy === "user2" ? "bg-orange-500" : "bg-blue-500"}`} />
-                          <div>
-                            <span className="text-white text-sm">{s.name}</span>
-                            <span className="text-gray-500 text-xs ml-2">{s.category}</span>
-                            {s.lat && s.lng && (
-                              <span className="text-gray-600 text-xs ml-2">📍</span>
-                            )}
+                    {activeMap.sights.map((s) => {
+                      const sightLinks = fotogruppenLinks.filter(l => l.entityType === "sight" && l.entityId === s.id);
+                      return (
+                        <div key={s.id} className="px-5 py-3 flex items-center justify-between">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <span className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${s.visitedBy === "both" ? "bg-green-500" : s.visitedBy === "user2" ? "bg-orange-500" : "bg-blue-500"}`} />
+                            <div className="min-w-0">
+                              <span className="text-white text-sm">{s.name}</span>
+                              <span className="text-gray-500 text-xs ml-2">{s.category}</span>
+                              {s.lat && s.lng && <span className="text-gray-600 text-xs ml-2">📍</span>}
+                              {sightLinks.length > 0 && (
+                                <span className="ml-2 text-amber-400 text-xs" title={sightLinks.map(l => l.fotogruppeNname).join(", ")}>
+                                  <Camera className="w-3 h-3 inline" /> {sightLinks.length}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0 ml-2">
+                            <button onClick={() => setCityModal({ type: "sight", existing: s })} className="text-gray-600 hover:text-amber-400 transition-colors">
+                              <Pencil className="w-3.5 h-3.5" />
+                            </button>
+                            <button onClick={() => deleteSight(s.id)} className="text-gray-600 hover:text-red-400 transition-colors">
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
                           </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <button onClick={() => setCityModal({ type: "sight", existing: s })}
-                            className="text-gray-600 hover:text-amber-400 transition-colors">
-                            <Pencil className="w-3.5 h-3.5" />
-                          </button>
-                          <button onClick={() => deleteSight(s.id)} className="text-gray-600 hover:text-red-400 transition-colors">
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </div>
-                    ))}
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -1171,9 +1275,13 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
           name={countryModal.name}
           existing={countryModal.existing}
           partnerName={activeMap.partnerName}
+          mapId={activeMap.id}
+          fotogruppenLinks={fotogruppenLinks}
+          isFrank={isFrank}
           onSave={handleCountrySave}
           onDelete={handleCountryDelete}
           onClose={() => setCountryModal(null)}
+          onLinksChanged={loadMaps}
         />
       )}
       {cityModal && activeMap && (
@@ -1185,8 +1293,11 @@ export default function ReisenClient({ currentUserId }: { currentUserId: number 
           initialLat={cityModal.lat}
           initialLng={cityModal.lng}
           existing={cityModal.existing ?? null}
+          fotogruppenLinks={fotogruppenLinks}
+          isFrank={isFrank}
           onSaved={() => { setCityModal(null); loadMaps(); }}
           onClose={() => setCityModal(null)}
+          onLinksChanged={loadMaps}
         />
       )}
       {neueKarteModal && (

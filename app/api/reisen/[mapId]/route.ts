@@ -7,7 +7,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
-import { travelMaps, travelCountries, travelCities, travelSights, users } from "@/lib/db/schema";
+import { travelMaps, travelCountries, travelCities, travelSights, travelFotogruppenLinks, users } from "@/lib/db/schema";
 import { eq, or, and } from "drizzle-orm";
 
 type Params = { params: Promise<{ mapId: string }> };
@@ -39,10 +39,11 @@ export async function GET(_req: NextRequest, { params }: Params) {
     if (!map) return NextResponse.json({ error: "Nicht gefunden" }, { status: 404 });
 
     // Alles parallel laden
-    const [countries, cities, sights, ownerArr, partnerArr] = await Promise.all([
+    const [countries, cities, sights, fotogruppenLinks, ownerArr, partnerArr] = await Promise.all([
       db.select().from(travelCountries).where(eq(travelCountries.mapId, mapId)),
       db.select().from(travelCities).where(eq(travelCities.mapId, mapId)),
       db.select().from(travelSights).where(eq(travelSights.mapId, mapId)),
+      db.select().from(travelFotogruppenLinks).where(eq(travelFotogruppenLinks.mapId, mapId)),
       db.select({ id: users.id, name: users.name }).from(users).where(eq(users.id, map.userId)),
       map.partnerId
         ? db.select({ id: users.id, name: users.name }).from(users).where(eq(users.id, map.partnerId))
@@ -56,6 +57,7 @@ export async function GET(_req: NextRequest, { params }: Params) {
       countries,
       cities,
       sights,
+      fotogruppenLinks,
     });
   } catch (error) {
     console.error("GET /api/reisen/[mapId]:", error);

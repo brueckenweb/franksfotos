@@ -11,6 +11,7 @@
  */
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useSearchParams } from "next/navigation";
 import AlbumTreeSelect from "@/app/admin/alben/AlbumTreeSelect";
 import {
   Search, RefreshCw, Loader2, AlertCircle, ChevronLeft, ChevronRight,
@@ -68,6 +69,8 @@ function isoToInput(raw: string | null | undefined): string {
 // ─── Hauptkomponente ──────────────────────────────────────────────────────────
 
 export default function FotodatenbankBrowser() {
+  const searchParams = useSearchParams();
+
   // ── Daten ──
   const [rows,       setRows]       = useState<FdEintrag[]>([]);
   const [total,      setTotal]      = useState(0);
@@ -76,8 +79,9 @@ export default function FotodatenbankBrowser() {
   const [fehler,     setFehler]     = useState<string | null>(null);
 
   // ── Such/Filter/Sort ──
-  const [suchtext,   setSuchtext]   = useState("");
-  const [suchtextTmp,setSuchtextTmp]= useState("");
+  const [suchtext,        setSuchtext]        = useState("");
+  const [suchtextTmp,     setSuchtextTmp]     = useState("");
+  const [fotogruppeFilter,setFotogruppeFilter]= useState<string>("");
   const [seite,      setSeite]      = useState(1);
   const [limit]                     = useState(50);
   const [sortCol,    setSortCol]    = useState<SortCol>("bnummer");
@@ -142,16 +146,27 @@ export default function FotodatenbankBrowser() {
     });
   }, []);
 
+  // ── URL-Parameter ?fotogruppe= beim Mount auslesen ──────────────────────
+  useEffect(() => {
+    const fg = searchParams.get("fotogruppe");
+    if (fg) {
+      setFotogruppeFilter(fg);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // ── Daten laden ───────────────────────────────────────────────────────────
-  const laden = useCallback(async (opts?: { s?: string; pg?: number; sc?: SortCol; sd?: "asc" | "desc" }) => {
+  const laden = useCallback(async (opts?: { s?: string; pg?: number; sc?: SortCol; sd?: "asc" | "desc"; fg?: string }) => {
     setLoading(true);
     setFehler(null);
     const q   = opts?.s  ?? suchtext;
     const pg  = opts?.pg ?? seite;
     const sc  = opts?.sc ?? sortCol;
     const sd  = opts?.sd ?? sortDir;
+    const fg  = opts?.fg !== undefined ? opts.fg : fotogruppeFilter;
     try {
       const params = new URLSearchParams({ q, seite: String(pg), limit: String(limit), sort: sc, dir: sd });
+      if (fg) params.set("fotogruppe", fg);
       const res  = await fetch(`/api/fotodatenbank/datenbank?${params}`);
       const data = await res.json();
       if (!res.ok) { setFehler((data as { error?: string }).error ?? "Fehler"); return; }
@@ -163,7 +178,7 @@ export default function FotodatenbankBrowser() {
     } finally {
       setLoading(false);
     }
-  }, [suchtext, seite, sortCol, sortDir, limit]);
+  }, [suchtext, seite, sortCol, sortDir, limit, fotogruppeFilter]);
 
   useEffect(() => { laden(); }, [laden]);
 
@@ -403,6 +418,24 @@ export default function FotodatenbankBrowser() {
           </button>
         </div>
       </div>
+
+      {/* ── Fotogruppen-Filter-Banner ── */}
+      {fotogruppeFilter && (
+        <div className="flex items-center gap-3 bg-amber-900/20 border border-amber-800/50 rounded-xl px-4 py-3 text-sm">
+          <Camera className="w-4 h-4 text-amber-400 flex-shrink-0" />
+          <span className="text-amber-300">
+            Gefiltert nach Fotogruppe ID <span className="font-mono font-bold">{fotogruppeFilter}</span>
+          </span>
+          <button
+            type="button"
+            onClick={() => { setFotogruppeFilter(""); setSeite(1); laden({ fg: "", pg: 1 }); }}
+            className="ml-auto text-amber-500 hover:text-amber-300 transition-colors"
+            title="Filter entfernen"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       {/* ── Fehler ── */}
       {fehler && (

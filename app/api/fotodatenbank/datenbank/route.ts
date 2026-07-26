@@ -12,7 +12,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/auth";
 import { db } from "@/lib/db";
 import { fdFotodatenbank, fdFotogruppenverkn, fdFotogruppen } from "@/lib/db/schema";
-import { or, like, eq, desc, asc, sql } from "drizzle-orm";
+import { or, like, eq, desc, asc, sql, and, inArray } from "drizzle-orm";
 import type { AnyMySqlColumn } from "drizzle-orm/mysql-core";
 
 // ── GET: Liste mit Suche + Pagination ─────────────────────────────────────────
@@ -24,11 +24,13 @@ export async function GET(request: NextRequest) {
   }
 
   const { searchParams } = new URL(request.url);
-  const q      = (searchParams.get("q") ?? "").trim();
-  const seite  = Math.max(1, parseInt(searchParams.get("seite") ?? "1", 10));
-  const limit  = Math.min(200, Math.max(10, parseInt(searchParams.get("limit") ?? "50", 10)));
-  const sort   = searchParams.get("sort") ?? "bnummer";
-  const dir    = searchParams.get("dir")  === "asc" ? "asc" : "desc";
+  const q           = (searchParams.get("q") ?? "").trim();
+  const seite       = Math.max(1, parseInt(searchParams.get("seite") ?? "1", 10));
+  const limit       = Math.min(200, Math.max(10, parseInt(searchParams.get("limit") ?? "50", 10)));
+  const sort        = searchParams.get("sort") ?? "bnummer";
+  const dir         = searchParams.get("dir")  === "asc" ? "asc" : "desc";
+  const fotogruppeP = searchParams.get("fotogruppe");
+  const fotogruppeId = fotogruppeP ? parseInt(fotogruppeP, 10) : null;
   const offset = (seite - 1) * limit;
 
   try {
@@ -45,7 +47,7 @@ export async function GET(request: NextRequest) {
     const sortCol = SORT_COLS[sort] ?? fdFotodatenbank.bnummer;
     const orderBy = dir === "asc" ? asc(sortCol) : desc(sortCol);
 
-    // Such-Bedingung (wird zweimal verwendet)
+    // Such-Bedingung
     const suchBedingung = q
       ? or(
           like(fdFotodatenbank.land,     `%${q}%`),
@@ -60,12 +62,31 @@ export async function GET(request: NextRequest) {
         )
       : undefined;
 
+    // Fotogruppen-Filter: Nur B-Nummern die zu dieser Fotogruppe gehören
+    let fotogruppeBnummern: number[] | null = null;
+    if (fotogruppeId && !isNaN(fotogruppeId)) {
+      const verkn = await db
+        .select({ bnummer: fdFotogruppenverkn.bnummer })
+        .from(fdFotogruppenverkn)
+        .where(eq(fdFotogruppenverkn.idfgruppe, fotogruppeId));
+      fotogruppeBnummern = verkn.map((v) => v.bnummer);
+    }
+
+    // Kombinierte Bedingung
+    const bedingung = fotogruppeBnummern !== null
+      ? (fotogruppeBnummern.length === 0
+          ? sql`1=0`  // Keine Fotos in dieser Gruppe → leeres Ergebnis
+          : suchBedingung
+            ? and(suchBedingung, inArray(fdFotodatenbank.bnummer, fotogruppeBnummern))
+            : inArray(fdFotodatenbank.bnummer, fotogruppeBnummern))
+      : suchBedingung;
+
     // Parallel: Count + Daten
     const [countResult, rows] = await Promise.all([
       db
         .select({ total: sql<number>`COUNT(*)` })
         .from(fdFotodatenbank)
-        .where(suchBedingung),
+        .where(bedingung),
       db
         .select({
           bnummer:          fdFotodatenbank.bnummer,
@@ -91,7 +112,7 @@ export async function GET(request: NextRequest) {
           gpsH:             fdFotodatenbank.gpsH,
         })
         .from(fdFotodatenbank)
-        .where(suchBedingung)
+        .where(bedingung)
         .orderBy(orderBy)
         .limit(limit)
         .offset(offset),

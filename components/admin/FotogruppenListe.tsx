@@ -4,9 +4,10 @@
  * Fotogruppen-Liste mit CRUD-Formular
  * Tabelle aller fd_fotogruppen-Einträge, filterbar + sortierbar.
  * Modal zum Anlegen / Bearbeiten.
+ * Separates Modal für Reisekarten-Zuordnung (inkl. Geocoding für neue Städte).
  */
 
-import { useState, useEffect, Fragment } from "react";
+import { useState, useEffect, Fragment, useRef } from "react";
 import Link from "next/link";
 import {
   Loader2,
@@ -29,12 +30,29 @@ import {
   Save,
   AlertTriangle,
   ArrowLeft,
+  Map,
+  MapPin,
+  Link2,
+  Unlink,
+  Search,
+  Globe,
 } from "lucide-react";
 
 // ─── Typen ────────────────────────────────────────────────────────────────────
 
 type SortCol = "idfgruppe" | "name" | "adatum" | "edatum" | "eingetragen" | "anzahl" | "gpxTracks";
 type SortDir = "asc" | "desc";
+
+interface TravelMap { id: number; name: string; }
+interface TravelFotogruppenLink {
+  id: number;
+  entityType: string;
+  entityId: number;
+  entityName?: string;
+  mapId: number;
+  fotogruppeId: number;
+  fotogruppeNname: string;
+}
 
 interface Fotogruppe {
   idfgruppe:       number;
@@ -51,6 +69,7 @@ interface Fotogruppe {
   anzahl:          number;        // aus DB (Cache für inaktive Gruppen)
   anzahlFotos?:    number;        // lazy nachgeladen (nur aktive Gruppen)
   anzahlGpxTracks?: number;       // lazy nachgeladen: Anzahl verknüpfter GPX-Tracks
+  anzahlReiseLinks?: number;      // lazy nachgeladen: Anzahl Reisekarten-Verknüpfungen
 }
 
 interface FormData {
@@ -60,6 +79,22 @@ interface FormData {
   edatum:      string;
   einaktiv:    "ja" | "nein";
 }
+
+type EntityOption = { id: number; name: string; entityType: string; };
+
+type NominatimResult = {
+  display_name: string;
+  lat: string;
+  lon: string;
+  address?: {
+    country_code?: string;
+    city?: string;
+    town?: string;
+    village?: string;
+    county?: string;
+    country?: string;
+  };
+};
 
 // ─── Hilfsfunktionen ──────────────────────────────────────────────────────────
 
@@ -91,6 +126,627 @@ const EMPTY_FORM: FormData = {
   einaktiv:    "nein",
 };
 
+// ─── ReisekarteLinkModal ──────────────────────────────────────────────────────
+
+interface ReisekarteLinkModalProps {
+  gruppe: Fotogruppe;
+  onClose: () => void;
+}
+
+function ReisekarteLinkModal({ gruppe, onClose }: ReisekarteLinkModalProps) {
+  // Travel-Maps State
+  const [travelMaps,       setTravelMaps]       = useState<TravelMap[]>([]);
+  const [travelMapsLoaded, setTravelMapsLoaded] = useState(false);
+  const [selMapId,         setSelMapId]         = useState<number | null>(null);
+  const [travelLinks,      setTravelLinks]      = useState<TravelFotogruppenLink[]>([]);
+  const [travelLinksLoad,  setTravelLinksLoad]  = useState(false);
+  const [linkFehler,       setLinkFehler]       = useState<string | null>(null);
+  const [linkSaving,       setLinkSaving]       = useState(false);
+
+  // Entity-Suche
+  const [entityTyp,        setEntityTyp]        = useState<"country" | "city" | "sight">("city");
+  const [entitySuche,      setEntitySuche]      = useState("");
+  const [entityOptionen,   setEntityOptionen]   = useState<EntityOption[]>([]);
+  const [entitySuchLaeuft, setEntitySuchLaeuft] = useState(false);
+  const [selEntity,        setSelEntity]        = useState<EntityOption | null>(null);
+  const [keineErgebnisse,  setKeineErgebnisse]  = useState(false);
+
+  // Neue Stadt anlegen (Geocoding-Flow)
+  const [neueStadtModus,   setNeueStadtModus]   = useState(false);
+  const [neueStadtName,    setNeueStadtName]    = useState("");
+  const [neueStadtLat,     setNeueStadtLat]     = useState("");
+  const [neueStadtLng,     setNeueStadtLng]     = useState("");
+  const [neueStadtCC,      setNeueStadtCC]      = useState("DE");
+  const [neueStadtLandName, setNeueStadtLandName] = useState("Deutschland");
+  const [geoLoading,       setGeoLoading]       = useState(false);
+  const [geoMsg,           setGeoMsg]           = useState<{ type: "ok" | "err"; text: string } | null>(null);
+  const [neueStadtSaving,  setNeueStadtSaving]  = useState(false);
+
+  // Nominatim Autocomplete
+  const [suggestions,      setSuggestions]      = useState<NominatimResult[]>([]);
+  const [showSuggestions,  setShowSuggestions]  = useState(false);
+  const suggestTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Beim ersten Öffnen: Karten laden
+  useEffect(() => {
+    ladenTravelMapsInit();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function ladenTravelMapsInit() {
+    if (travelMapsLoaded) return;
+    try {
+      const res = await fetch("/api/reisen");
+      if (!res.ok) return;
+      const data = await res.json() as TravelMap[] | { maps?: TravelMap[] };
+      const maps = Array.isArray(data) ? data : (data.maps ?? []);
+      setTravelMaps(maps);
+      setTravelMapsLoaded(true);
+      if (maps.length > 0) {
+        const firstId = maps[0].id;
+        setSelMapId(firstId);
+        await ladenTravelLinks(firstId, gruppe.idfgruppe);
+      }
+    } catch { /* ignorieren */ }
+  }
+
+  async function ladenTravelLinks(mapId: number, fotogruppeId: number) {
+    setTravelLinksLoad(true);
+    setLinkFehler(null);
+    try {
+      const res = await fetch(
+        `/api/reisen/${mapId}/fotogruppen-links?fotogruppeId=${fotogruppeId}`
+      );
+      if (!res.ok) return;
+      const data = await res.json() as TravelFotogruppenLink[];
+      setTravelLinks(data);
+    } catch { /* ignorieren */ }
+    finally { setTravelLinksLoad(false); }
+  }
+
+  async function sucheEntities(q: string, mapId: number, typ: "country" | "city" | "sight") {
+    if (!q.trim()) { setEntityOptionen([]); setKeineErgebnisse(false); return; }
+    setEntitySuchLaeuft(true);
+    setKeineErgebnisse(false);
+    try {
+      const res = await fetch(
+        `/api/reisen/${mapId}/entities?q=${encodeURIComponent(q)}&type=${typ}`
+      );
+      if (!res.ok) { setEntityOptionen([]); return; }
+      const data = await res.json() as EntityOption[];
+      setEntityOptionen(data);
+      setKeineErgebnisse(data.length === 0 && q.trim().length >= 2);
+    } catch { setEntityOptionen([]); }
+    finally { setEntitySuchLaeuft(false); }
+  }
+
+  async function linkHinzufuegen() {
+    if (!selEntity || !selMapId) return;
+    setLinkSaving(true);
+    setLinkFehler(null);
+    try {
+      const res = await fetch(`/api/reisen/${selMapId}/fotogruppen-links`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entityType:      selEntity.entityType,
+          entityId:        selEntity.id,
+          fotogruppeId:    gruppe.idfgruppe,
+          fotogruppeNname: gruppe.name,
+        }),
+      });
+      if (!res.ok) {
+        const d = await res.json() as { error?: string };
+        setLinkFehler(d.error ?? "Fehler beim Verknüpfen");
+        return;
+      }
+      await ladenTravelLinks(selMapId, gruppe.idfgruppe);
+      setSelEntity(null);
+      setEntitySuche("");
+      setEntityOptionen([]);
+      setKeineErgebnisse(false);
+    } catch (e) { setLinkFehler(String(e)); }
+    finally { setLinkSaving(false); }
+  }
+
+  async function linkEntfernen(linkId: number) {
+    if (!selMapId) return;
+    setLinkFehler(null);
+    try {
+      const res = await fetch(`/api/reisen/${selMapId}/fotogruppen-links?id=${linkId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const d = await res.json() as { error?: string };
+        setLinkFehler(d.error ?? "Fehler beim Entfernen");
+        return;
+      }
+      setTravelLinks((prev) => prev.filter((l) => l.id !== linkId));
+    } catch (e) { setLinkFehler(String(e)); }
+  }
+
+  // ── Geocoding / neue Stadt ────────────────────────────────────────
+
+  function handleNeueStadtNameChange(value: string) {
+    setNeueStadtName(value);
+    setGeoMsg(null);
+    setShowSuggestions(false);
+    if (suggestTimer.current) clearTimeout(suggestTimer.current);
+    if (value.trim().length < 2) { setSuggestions([]); return; }
+    suggestTimer.current = setTimeout(async () => {
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(value)}&format=json&limit=5&addressdetails=1&accept-language=de`;
+        const res = await fetch(url, { headers: { "User-Agent": "FranksFotos/1.0" } });
+        const data: NominatimResult[] = await res.json();
+        setSuggestions(data ?? []);
+        setShowSuggestions((data ?? []).length > 0);
+      } catch { /* ignorieren */ }
+    }, 400);
+  }
+
+  function pickSuggestion(hit: NominatimResult) {
+    const primaryName = hit.address?.city ?? hit.address?.town ?? hit.address?.village ?? hit.display_name.split(",")[0].trim();
+    setNeueStadtName(primaryName);
+    setNeueStadtLat(parseFloat(hit.lat).toFixed(5));
+    setNeueStadtLng(parseFloat(hit.lon).toFixed(5));
+    const cc = hit.address?.country_code?.toUpperCase() ?? "DE";
+    setNeueStadtCC(cc);
+    setNeueStadtLandName(hit.address?.country ?? "");
+    setGeoMsg({ type: "ok", text: `✓ ${hit.display_name}` });
+    setShowSuggestions(false);
+    setSuggestions([]);
+  }
+
+  async function searchGeo() {
+    const q = neueStadtName.trim();
+    if (!q) { setGeoMsg({ type: "err", text: "Bitte zuerst einen Namen eingeben." }); return; }
+    setGeoLoading(true); setGeoMsg(null); setShowSuggestions(false);
+    try {
+      const url = `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(q)}&format=json&limit=1&addressdetails=1&accept-language=de`;
+      const res = await fetch(url, { headers: { "User-Agent": "FranksFotos/1.0" } });
+      const data: NominatimResult[] = await res.json();
+      if (!data || data.length === 0) {
+        setGeoMsg({ type: "err", text: `„${q}" wurde nicht gefunden.` });
+        return;
+      }
+      const hit = data[0];
+      setNeueStadtLat(parseFloat(hit.lat).toFixed(5));
+      setNeueStadtLng(parseFloat(hit.lon).toFixed(5));
+      const cc = hit.address?.country_code?.toUpperCase() ?? "DE";
+      setNeueStadtCC(cc);
+      setNeueStadtLandName(hit.address?.country ?? "");
+      setGeoMsg({ type: "ok", text: `✓ ${hit.display_name}` });
+    } catch {
+      setGeoMsg({ type: "err", text: "Geocoding-Fehler. Bitte Koordinaten manuell eingeben." });
+    } finally { setGeoLoading(false); }
+  }
+
+  async function neueStadtAnlegenUndVerknuepfen() {
+    if (!selMapId || !neueStadtName.trim()) return;
+    if (!neueStadtCC) {
+      setLinkFehler("Bitte zuerst den Ort geocodieren (Ländercode fehlt).");
+      return;
+    }
+    setNeueStadtSaving(true);
+    setLinkFehler(null);
+    try {
+      // 1. Stadt anlegen
+      const cityRes = await fetch(`/api/reisen/${selMapId}/admin-cities`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name:        neueStadtName.trim(),
+          countryCode: neueStadtCC,
+          countryName: neueStadtLandName,
+          lat:         neueStadtLat || null,
+          lng:         neueStadtLng || null,
+          visitedBy:   "user1",
+        }),
+      });
+      if (!cityRes.ok) {
+        const d = await cityRes.json() as { error?: string };
+        setLinkFehler(d.error ?? "Fehler beim Anlegen der Stadt");
+        return;
+      }
+      const cityData = await cityRes.json() as { id: number };
+      const newCityId = cityData.id;
+
+      // 2. Fotogruppe mit neuer Stadt verknüpfen
+      const linkRes = await fetch(`/api/reisen/${selMapId}/fotogruppen-links`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entityType:      "city",
+          entityId:        newCityId,
+          fotogruppeId:    gruppe.idfgruppe,
+          fotogruppeNname: gruppe.name,
+        }),
+      });
+      if (!linkRes.ok) {
+        const d = await linkRes.json() as { error?: string };
+        setLinkFehler(d.error ?? "Fehler beim Verknüpfen");
+        return;
+      }
+
+      // Erfolg: Zurücksetzen
+      await ladenTravelLinks(selMapId, gruppe.idfgruppe);
+      setNeueStadtModus(false);
+      setNeueStadtName("");
+      setNeueStadtLat("");
+      setNeueStadtLng("");
+      setNeueStadtCC("DE");
+      setNeueStadtLandName("");
+      setGeoMsg(null);
+      setSuggestions([]);
+      setEntitySuche("");
+      setEntityOptionen([]);
+      setKeineErgebnisse(false);
+    } catch (e) { setLinkFehler(String(e)); }
+    finally { setNeueStadtSaving(false); }
+  }
+
+  // ──────────────────────────────────────────────────────────────────
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/70" onClick={onClose} />
+
+      {/* Dialog */}
+      <div className="relative z-10 bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-lg max-h-[90vh] flex flex-col shadow-2xl">
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-800 flex-shrink-0">
+          <div className="flex items-center gap-2.5">
+            <Map className="w-5 h-5 text-purple-400" />
+            <div>
+              <h2 className="text-white font-semibold text-base">Reisekarte verknüpfen</h2>
+              <p className="text-gray-500 text-xs mt-0.5">
+                Gruppe: <span className="text-gray-300">{gruppe.name}</span>
+              </p>
+            </div>
+          </div>
+          <button type="button" onClick={onClose} className="text-gray-500 hover:text-white transition-colors">
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Inhalt (scrollbar) */}
+        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-4">
+
+          {/* Karten-Auswahl */}
+          {travelMaps.length > 1 && (
+            <div>
+              <label className="text-gray-500 text-xs uppercase tracking-wide block mb-1.5">Reisekarte</label>
+              <select
+                value={selMapId ?? ""}
+                onChange={(e) => {
+                  const id = Number(e.target.value);
+                  setSelMapId(id);
+                  if (id) ladenTravelLinks(id, gruppe.idfgruppe);
+                  setEntitySuche("");
+                  setEntityOptionen([]);
+                  setSelEntity(null);
+                  setKeineErgebnisse(false);
+                  setNeueStadtModus(false);
+                }}
+                className="input-field w-full text-sm"
+              >
+                {travelMaps.map((m) => (
+                  <option key={m.id} value={m.id}>{m.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {travelMaps.length === 0 && travelMapsLoaded && (
+            <p className="text-gray-600 text-sm text-center py-4">Keine Reisekarten vorhanden.</p>
+          )}
+          {!travelMapsLoaded && (
+            <div className="flex items-center gap-2 text-gray-500 text-sm py-4">
+              <Loader2 className="w-4 h-4 animate-spin" /> Lade Reisekarten…
+            </div>
+          )}
+
+          {selMapId && (
+            <>
+              {/* Bestehende Links */}
+              <div>
+                <p className="text-gray-500 text-xs uppercase tracking-wide mb-2">Aktuelle Verknüpfungen</p>
+                {travelLinksLoad ? (
+                  <div className="flex items-center gap-2 text-gray-500 text-xs">
+                    <Loader2 className="w-3 h-3 animate-spin" /> Lade Verknüpfungen…
+                  </div>
+                ) : travelLinks.length > 0 ? (
+                  <div className="space-y-1">
+                    {travelLinks.map((l) => (
+                      <div key={l.id} className="flex items-center justify-between bg-gray-800/60 rounded-lg px-3 py-2">
+                        <div className="flex items-center gap-2 text-xs">
+                          <MapPin className="w-3.5 h-3.5 text-purple-400 flex-shrink-0" />
+                          <span className="text-gray-400 capitalize">{l.entityType}:</span>
+                          <span className="text-gray-200 font-medium">{l.entityName || `ID ${l.entityId}`}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => linkEntfernen(l.id)}
+                          className="text-gray-600 hover:text-red-400 transition-colors ml-2"
+                          title="Verknüpfung entfernen"
+                        >
+                          <Unlink className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="text-gray-600 text-xs">Noch keine Verknüpfungen für diese Karte.</p>
+                )}
+              </div>
+
+              <div className="border-t border-gray-800 pt-4">
+                <p className="text-gray-500 text-xs uppercase tracking-wide mb-3">Neue Verknüpfung hinzufügen</p>
+
+                {/* Typ-Auswahl + Suche */}
+                {!neueStadtModus && (
+                  <>
+                    <div className="flex items-center gap-2 mb-2">
+                      <select
+                        value={entityTyp}
+                        onChange={(e) => {
+                          setEntityTyp(e.target.value as "country" | "city" | "sight");
+                          setEntitySuche("");
+                          setEntityOptionen([]);
+                          setSelEntity(null);
+                          setKeineErgebnisse(false);
+                        }}
+                        className="input-field text-xs w-28 flex-shrink-0"
+                      >
+                        <option value="city">Stadt</option>
+                        <option value="country">Land</option>
+                        <option value="sight">Sehensw.</option>
+                      </select>
+                      <div className="relative flex-1">
+                        <input
+                          type="text"
+                          value={entitySuche}
+                          onChange={(e) => {
+                            setEntitySuche(e.target.value);
+                            setSelEntity(null);
+                            if (selMapId) sucheEntities(e.target.value, selMapId, entityTyp);
+                          }}
+                          placeholder="Name suchen…"
+                          className="input-field text-sm w-full pr-7"
+                        />
+                        {entitySuchLaeuft ? (
+                          <Loader2 className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-500 animate-spin" />
+                        ) : (
+                          <Search className="absolute right-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-gray-600" />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Suchergebnisse */}
+                    {entityOptionen.length > 0 && !selEntity && (
+                      <div className="bg-gray-800 border border-gray-700 rounded-lg divide-y divide-gray-700 max-h-36 overflow-y-auto mb-2">
+                        {entityOptionen.map((opt) => (
+                          <button
+                            key={`${opt.entityType}-${opt.id}`}
+                            type="button"
+                            onClick={() => { setSelEntity(opt); setEntitySuche(opt.name); setEntityOptionen([]); setKeineErgebnisse(false); }}
+                            className="w-full text-left px-3 py-2 text-sm text-gray-200 hover:bg-gray-700 flex items-center gap-2"
+                          >
+                            <MapPin className="w-3 h-3 text-purple-400 flex-shrink-0" />
+                            {opt.name}
+                            <span className="text-gray-500 text-xs capitalize ml-auto">{opt.entityType}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Keine Ergebnisse + "Neue Stadt anlegen" für Städte */}
+                    {keineErgebnisse && !selEntity && entitySuche.trim().length >= 2 && (
+                      <div className="bg-gray-800/60 border border-gray-700 rounded-lg px-3 py-2.5 mb-2">
+                        <p className="text-gray-500 text-xs mb-2">
+                          Keine {entityTyp === "city" ? "Stadt" : entityTyp === "country" ? "Land" : "Sehenswürdigkeit"} „{entitySuche}" in dieser Karte gefunden.
+                        </p>
+                        {entityTyp === "city" && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setNeueStadtModus(true);
+                              setNeueStadtName(entitySuche);
+                              setEntitySuche("");
+                              setEntityOptionen([]);
+                              setKeineErgebnisse(false);
+                              // Geocoding wird automatisch über handleNeueStadtNameChange getriggert
+                              // wenn der Nutzer den Namen im Geocoding-Panel bestätigt
+                            }}
+                            className="inline-flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors"
+                          >
+                            <Plus className="w-3 h-3" />
+                            Neue Stadt „{entitySuche}" anlegen
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Verknüpfen-Button */}
+                    {selEntity && (
+                      <button
+                        type="button"
+                        onClick={linkHinzufuegen}
+                        disabled={linkSaving}
+                        className="inline-flex items-center gap-2 bg-purple-600 hover:bg-purple-700 disabled:bg-purple-600/40 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                      >
+                        {linkSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Link2 className="w-3.5 h-3.5" />}
+                        Mit „{selEntity.name}" verknüpfen
+                      </button>
+                    )}
+                  </>
+                )}
+
+                {/* ── Neue Stadt anlegen (Geocoding-Flow) ── */}
+                {neueStadtModus && (
+                  <div className="bg-blue-950/30 border border-blue-800/50 rounded-xl p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Globe className="w-4 h-4 text-blue-400" />
+                        <span className="text-blue-300 text-sm font-medium">Neue Stadt anlegen</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => { setNeueStadtModus(false); setGeoMsg(null); setSuggestions([]); setNeueStadtName(""); setNeueStadtLat(""); setNeueStadtLng(""); }}
+                        className="text-gray-500 hover:text-white transition-colors"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    {/* Name mit Autocomplete */}
+                    <div>
+                      <label className="text-gray-400 text-xs block mb-1">Stadtname *</label>
+                      <div className="relative">
+                        <div className="flex gap-2">
+                          <input
+                            type="text"
+                            value={neueStadtName}
+                            onChange={(e) => handleNeueStadtNameChange(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") { setShowSuggestions(false); searchGeo(); }
+                              if (e.key === "Escape") setShowSuggestions(false);
+                            }}
+                            onBlur={() => setTimeout(() => setShowSuggestions(false), 150)}
+                            className="input-field flex-1 text-sm"
+                            placeholder="z.B. Paris (Vorschläge beim Tippen)"
+                          />
+                          <button
+                            type="button"
+                            onClick={searchGeo}
+                            disabled={geoLoading}
+                            title="Koordinaten über Nominatim suchen"
+                            className="flex items-center gap-1 bg-sky-700 hover:bg-sky-600 disabled:bg-sky-900 text-white px-3 py-2 rounded-lg text-xs font-medium whitespace-nowrap"
+                          >
+                            {geoLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <MapPin className="w-3.5 h-3.5" />}
+                            Suchen
+                          </button>
+                        </div>
+
+                        {/* Autocomplete-Dropdown */}
+                        {showSuggestions && suggestions.length > 0 && (
+                          <div className="absolute z-50 top-full left-0 right-0 bg-gray-800 border border-gray-600 rounded-lg mt-1 max-h-44 overflow-y-auto shadow-2xl">
+                            {suggestions.map((hit, i) => {
+                              const primary = hit.address?.city ?? hit.address?.town ?? hit.address?.village ?? hit.display_name.split(",")[0].trim();
+                              const secondary = hit.display_name.split(",").slice(1).slice(0, 2).join(",").trim();
+                              return (
+                                <button
+                                  key={i}
+                                  type="button"
+                                  onMouseDown={(e) => { e.preventDefault(); pickSuggestion(hit); }}
+                                  className="w-full text-left px-3 py-2 hover:bg-gray-700 border-b border-gray-700/50 last:border-0 flex flex-col gap-0.5"
+                                >
+                                  <span className="text-white text-sm font-medium truncate">{primary}</span>
+                                  {secondary && <span className="text-gray-400 text-xs truncate">{secondary}</span>}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Geocoding-Status */}
+                    {geoMsg && (
+                      <p className={`text-xs px-1 truncate ${geoMsg.type === "ok" ? "text-green-400" : "text-red-400"}`} title={geoMsg.text}>
+                        {geoMsg.text}
+                      </p>
+                    )}
+
+                    {/* Koordinaten (nur anzeigen, editierbar) */}
+                    <div className="grid grid-cols-2 gap-2">
+                      <div>
+                        <label className="text-gray-400 text-xs block mb-1">Breite (lat)</label>
+                        <input
+                          type="text"
+                          value={neueStadtLat}
+                          onChange={(e) => setNeueStadtLat(e.target.value)}
+                          className="input-field text-xs w-full"
+                          placeholder="48.85341"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-gray-400 text-xs block mb-1">Länge (lng)</label>
+                        <input
+                          type="text"
+                          value={neueStadtLng}
+                          onChange={(e) => setNeueStadtLng(e.target.value)}
+                          className="input-field text-xs w-full"
+                          placeholder="2.3488"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Ländercode */}
+                    <div className="flex items-center gap-3 text-xs text-gray-400">
+                      <span>Land:</span>
+                      <span className="text-gray-200 font-medium">
+                        {neueStadtCC}{neueStadtLandName ? ` – ${neueStadtLandName}` : ""}
+                      </span>
+                      <input
+                        type="text"
+                        value={neueStadtCC}
+                        onChange={(e) => setNeueStadtCC(e.target.value.toUpperCase().slice(0, 2))}
+                        className="input-field text-xs w-12 uppercase"
+                        maxLength={2}
+                        placeholder="DE"
+                      />
+                    </div>
+
+                    {/* Aktions-Buttons */}
+                    <div className="flex items-center gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={neueStadtAnlegenUndVerknuepfen}
+                        disabled={neueStadtSaving || !neueStadtName.trim()}
+                        className="inline-flex items-center gap-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-600/40 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+                      >
+                        {neueStadtSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Plus className="w-3.5 h-3.5" />}
+                        Stadt anlegen & verknüpfen
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { setNeueStadtModus(false); setGeoMsg(null); setSuggestions([]); setNeueStadtName(""); }}
+                        className="text-gray-500 hover:text-gray-300 text-sm px-2 py-2 transition-colors"
+                      >
+                        Abbrechen
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
+          {linkFehler && (
+            <div className="flex items-start gap-2 bg-red-900/20 border border-red-800 rounded-lg px-3 py-2 text-red-400 text-xs">
+              <AlertCircle className="w-3.5 h-3.5 flex-shrink-0 mt-0.5" />
+              <span>{linkFehler}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="px-6 py-4 border-t border-gray-800 flex justify-end flex-shrink-0">
+          <button
+            type="button"
+            onClick={onClose}
+            className="inline-flex items-center gap-2 bg-gray-700 hover:bg-gray-600 text-white px-5 py-2 rounded-lg text-sm font-medium transition-colors"
+          >
+            Schließen
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Hauptkomponente ──────────────────────────────────────────────────────────
 
 export default function FotogruppenListe() {
@@ -106,6 +762,7 @@ export default function FotogruppenListe() {
   const [sortDir,         setSortDir]         = useState<SortDir>("asc");
   const [fotozahlenLaden,   setFotozahlenLaden]   = useState(false);
   const [gpxZahlenLaden,    setGpxZahlenLaden]    = useState(false);
+  const [reiseZahlenLaden,  setReiseZahlenLaden]  = useState(false);
 
   // ── Modal-State ───────────────────────────────────────────────────
   const [modalOffen,    setModalOffen]    = useState(false);
@@ -114,6 +771,9 @@ export default function FotogruppenListe() {
   const [formSaving,    setFormSaving]    = useState(false);
   const [formError,     setFormError]     = useState<string | null>(null);
   const [formSuccess,   setFormSuccess]   = useState<string | null>(null);
+
+  // ── Reisekarte-Modal ──────────────────────────────────────────────
+  const [reiseModalGruppe, setReiseModalGruppe] = useState<Fotogruppe | null>(null);
 
   // ── Löschen-State ─────────────────────────────────────────────────
   const [loeschenGruppe,  setLoeschenGruppe]  = useState<Fotogruppe | null>(null);
@@ -181,8 +841,28 @@ export default function FotogruppenListe() {
     }
   }
 
+  // ── Reise-Link-Anzahlen lazy nachladen ────────────────────────────
+  async function ladenReiseZahlen() {
+    setReiseZahlenLaden(true);
+    try {
+      const res = await fetch("/api/fotodatenbank/fotogruppen-reisezahlen");
+      if (!res.ok) return;
+      const map = await res.json() as Record<string, number>;
+      setGruppen((prev) =>
+        prev.map((g) => ({
+          ...g,
+          anzahlReiseLinks: map[String(g.idfgruppe)] ?? 0,
+        }))
+      );
+    } catch {
+      // Fehler ignorieren
+    } finally {
+      setReiseZahlenLaden(false);
+    }
+  }
+
   useEffect(() => {
-    laden().then(() => { ladenFotozahlen(); ladenGpxZahlen(); });
+    laden().then(() => { ladenFotozahlen(); ladenGpxZahlen(); ladenReiseZahlen(); });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -533,7 +1213,12 @@ export default function FotogruppenListe() {
                   <SortTh col="eingetragen"  label="Eingetragen" current={sortCol} dir={sortDir} onSort={handleSort} className="w-28" />
                   <SortTh col="anzahl"       label="Fotos"       current={sortCol} dir={sortDir} onSort={handleSort} className="w-20" />
                   <SortTh col="gpxTracks"    label="GPX-Tracks"  current={sortCol} dir={sortDir} onSort={handleSort} className="w-24" />
-                  <th className="text-right px-4 py-3 font-medium w-36">Aktionen</th>
+                  <th className="text-left px-4 py-3 font-medium w-20" title="Reisekarten-Verknüpfungen">
+                    <span className="inline-flex items-center gap-1 uppercase tracking-wide text-gray-400">
+                      <Map className="w-3 h-3" />Karte
+                    </span>
+                  </th>
+                  <th className="text-right px-4 py-3 font-medium w-44">Aktionen</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-800/60">
@@ -603,27 +1288,16 @@ export default function FotogruppenListe() {
                         {/* Eingetragen */}
                         <td className="px-4 py-3 text-gray-500 text-xs tabular-nums">{formatDate(g.eingetragen)}</td>
 
-                        {/* Foto-Anzahl:
-                            Aktive Gruppen  → lazy geladen (anzahlFotos), mit Spinner
-                            Inaktive Gruppen → DB-Cache (anzahl), sofort verfügbar */}
+                        {/* Foto-Anzahl */}
                         <td className="px-4 py-3">
-                          {istInaktiv ? (
-                            // ── Inaktiv: gespeicherter DB-Wert ──
-                            g.anzahl > 0 ? (
-                              <span className="inline-flex items-center gap-1 text-gray-400 text-xs font-semibold tabular-nums" title="Gespeicherter Wert (DB-Cache)">
-                                <span className="w-1.5 h-1.5 rounded-full bg-gray-500 flex-shrink-0" />
-                                {g.anzahl}
-                              </span>
-                            ) : (
-                              <span className="text-gray-600 text-xs">–</span>
-                            )
-                          ) : fotozahlenLaden && g.anzahlFotos === undefined ? (
-                            // ── Aktiv: noch am Laden ──
+                          {fotozahlenLaden && g.anzahlFotos === undefined ? (
                             <Loader2 className="w-3 h-3 text-gray-600 animate-spin" />
                           ) : (g.anzahlFotos ?? 0) > 0 ? (
-                            // ── Aktiv: lazy geladen ──
-                            <span className="inline-flex items-center gap-1 text-blue-400 text-xs font-semibold tabular-nums">
-                              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 flex-shrink-0" />
+                            <span
+                              className={`inline-flex items-center gap-1 text-xs font-semibold tabular-nums ${istInaktiv ? "text-gray-400" : "text-blue-400"}`}
+                              title={istInaktiv ? "Gespeicherter Wert (DB-Cache)" : "Live-Wert"}
+                            >
+                              <span className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${istInaktiv ? "bg-gray-500" : "bg-blue-400"}`} />
                               {g.anzahlFotos}
                             </span>
                           ) : (
@@ -645,8 +1319,27 @@ export default function FotogruppenListe() {
                           )}
                         </td>
 
+                        {/* Reise-Links Anzahl */}
+                        <td className="px-4 py-3">
+                          {reiseZahlenLaden && g.anzahlReiseLinks === undefined ? (
+                            <Loader2 className="w-3 h-3 text-gray-600 animate-spin" />
+                          ) : (g.anzahlReiseLinks ?? 0) > 0 ? (
+                            <button
+                              type="button"
+                              onClick={() => setReiseModalGruppe(g)}
+                              className="inline-flex items-center gap-1 text-purple-400 text-xs font-semibold tabular-nums hover:text-purple-300 transition-colors"
+                              title="Reisekarten-Verknüpfungen anzeigen"
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full bg-purple-400 flex-shrink-0" />
+                              {g.anzahlReiseLinks}
+                            </button>
+                          ) : (
+                            <span className="text-gray-600 text-xs">–</span>
+                          )}
+                        </td>
+
                         {/* Aktionen */}
-                         <td className="px-4 py-3 text-right">
+                        <td className="px-4 py-3 text-right">
                           <div className="inline-flex items-center gap-1">
                             <button
                               type="button"
@@ -656,6 +1349,16 @@ export default function FotogruppenListe() {
                             >
                               <Pencil className="w-3.5 h-3.5" />
                               Bearbeiten
+                            </button>
+                            {/* Reisekarte-Button */}
+                            <button
+                              type="button"
+                              onClick={() => setReiseModalGruppe(g)}
+                              className="inline-flex items-center gap-1 text-gray-500 hover:text-purple-400 transition-colors text-xs px-2 py-1 rounded hover:bg-gray-800"
+                              title="Reisekarte verknüpfen"
+                            >
+                              <Map className="w-3.5 h-3.5" />
+                              Karte
                             </button>
                             <button
                               type="button"
@@ -683,7 +1386,7 @@ export default function FotogruppenListe() {
                       {/* Detail-Zeile */}
                       {aufgekl && (
                         <tr className="bg-gray-800/30">
-                          <td colSpan={9} className="px-6 py-4">
+                          <td colSpan={10} className="px-6 py-4">
                             <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
                               {g.beschreibung && (
                                 <div className="md:col-span-2">
@@ -815,6 +1518,27 @@ export default function FotogruppenListe() {
                 </button>
               </FormRow>
 
+              {/* Hinweis auf Reisekarte-Modal (nur beim Bearbeiten) */}
+              {editGruppe && (
+                <div className="border border-purple-800/40 bg-purple-900/10 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2">
+                    <Map className="w-4 h-4 text-purple-400 flex-shrink-0" />
+                    <span className="text-purple-300 text-sm">Reisekarten-Verknüpfungen</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      modalSchliessen();
+                      setReiseModalGruppe(editGruppe);
+                    }}
+                    className="inline-flex items-center gap-1.5 bg-purple-700 hover:bg-purple-600 text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors flex-shrink-0"
+                  >
+                    <Map className="w-3.5 h-3.5" />
+                    Verwalten
+                  </button>
+                </div>
+              )}
+
             </div>
 
             {/* Footer */}
@@ -835,61 +1559,70 @@ export default function FotogruppenListe() {
         </div>
       </div>
     )}
-      {/* ═══ Bestätigungs-Dialog: Löschen ══════════════════════════ */}
-      {loeschenGruppe && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-black/70" onClick={() => !loeschenLaeuft && setLoeschenGruppe(null)} />
-          <div className="relative z-10 bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md shadow-2xl p-6">
 
-            {/* Icon + Titel */}
-            <div className="flex items-start gap-4 mb-4">
-              <div className="w-10 h-10 rounded-full bg-red-900/40 border border-red-800 flex items-center justify-center flex-shrink-0">
-                <AlertTriangle className="w-5 h-5 text-red-400" />
-              </div>
-              <div>
-                <h3 className="text-white font-semibold text-base">Fotogruppe löschen?</h3>
-                <p className="text-gray-400 text-sm mt-1">
-                  Gruppe <span className="text-white font-medium">„{loeschenGruppe.name}"</span>{" "}
-                  (#{loeschenGruppe.idfgruppe}) wird unwiderruflich gelöscht.
-                </p>
-              </div>
+    {/* ═══ Modal: Reisekarte-Zuordnung ═══════════════════════════════ */}
+    {reiseModalGruppe && (
+      <ReisekarteLinkModal
+        gruppe={reiseModalGruppe}
+        onClose={() => setReiseModalGruppe(null)}
+      />
+    )}
+
+    {/* ═══ Bestätigungs-Dialog: Löschen ══════════════════════════════ */}
+    {loeschenGruppe && (
+      <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+        <div className="absolute inset-0 bg-black/70" onClick={() => !loeschenLaeuft && setLoeschenGruppe(null)} />
+        <div className="relative z-10 bg-gray-900 border border-gray-700 rounded-2xl w-full max-w-md shadow-2xl p-6">
+
+          {/* Icon + Titel */}
+          <div className="flex items-start gap-4 mb-4">
+            <div className="w-10 h-10 rounded-full bg-red-900/40 border border-red-800 flex items-center justify-center flex-shrink-0">
+              <AlertTriangle className="w-5 h-5 text-red-400" />
             </div>
-
-            {/* Fehlermeldung (z.B. verknüpfte Fotos) */}
-            {loeschenFehler && (
-              <div className="flex items-start gap-2 bg-red-900/20 border border-red-800 rounded-lg px-4 py-3 text-red-400 text-sm mb-4">
-                <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
-                <span>{loeschenFehler}</span>
-              </div>
-            )}
-
-            {/* Buttons */}
-            <div className="flex justify-end gap-3">
-              <button
-                type="button"
-                onClick={() => setLoeschenGruppe(null)}
-                disabled={loeschenLaeuft}
-                className="text-gray-400 hover:text-white px-4 py-2 rounded-lg text-sm transition-colors"
-              >
-                Abbrechen
-              </button>
-              {!loeschenFehler && (
-                <button
-                  type="button"
-                  onClick={handleLoeschen}
-                  disabled={loeschenLaeuft}
-                  className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 disabled:bg-red-600/40 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors"
-                >
-                  {loeschenLaeuft
-                    ? <Loader2 className="w-4 h-4 animate-spin" />
-                    : <Trash2 className="w-4 h-4" />}
-                  Löschen
-                </button>
-              )}
+            <div>
+              <h3 className="text-white font-semibold text-base">Fotogruppe löschen?</h3>
+              <p className="text-gray-400 text-sm mt-1">
+                Gruppe <span className="text-white font-medium">„{loeschenGruppe.name}"</span>{" "}
+                (#{loeschenGruppe.idfgruppe}) wird unwiderruflich gelöscht.
+              </p>
             </div>
           </div>
+
+          {/* Fehlermeldung (z.B. verknüpfte Fotos) */}
+          {loeschenFehler && (
+            <div className="flex items-start gap-2 bg-red-900/20 border border-red-800 rounded-lg px-4 py-3 text-red-400 text-sm mb-4">
+              <AlertCircle className="w-4 h-4 flex-shrink-0 mt-0.5" />
+              <span>{loeschenFehler}</span>
+            </div>
+          )}
+
+          {/* Buttons */}
+          <div className="flex justify-end gap-3">
+            <button
+              type="button"
+              onClick={() => setLoeschenGruppe(null)}
+              disabled={loeschenLaeuft}
+              className="text-gray-400 hover:text-white px-4 py-2 rounded-lg text-sm transition-colors"
+            >
+              Abbrechen
+            </button>
+            {!loeschenFehler && (
+              <button
+                type="button"
+                onClick={handleLoeschen}
+                disabled={loeschenLaeuft}
+                className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 disabled:bg-red-600/40 text-white px-5 py-2 rounded-lg text-sm font-semibold transition-colors"
+              >
+                {loeschenLaeuft
+                  ? <Loader2 className="w-4 h-4 animate-spin" />
+                  : <Trash2 className="w-4 h-4" />}
+                Löschen
+              </button>
+            )}
+          </div>
         </div>
-      )}
+      </div>
+    )}
     </>
   );
 }

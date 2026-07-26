@@ -36,6 +36,15 @@ export interface SightMarker {
   cityId?: number | null;
 }
 
+export interface FotogruppenLink {
+  id: number;
+  entityType: string;
+  entityId: number;
+  mapId: number;
+  fotogruppeId: number;
+  fotogruppeNname: string;
+}
+
 interface WorldMapProps {
   visitedCountries: VisitedCountry[];
   cities: CityMarker[];
@@ -47,6 +56,8 @@ interface WorldMapProps {
   height?: string;
   /** Kartenmodus: "laender" = Länderfärbung, "staedte" = helle Karte mit Stadtmarkern */
   mode?: "laender" | "staedte";
+  /** Fotogruppen-Verlinkungen für Länder/Städte/Sehenswürdigkeiten */
+  fotogruppenLinks?: FotogruppenLink[];
   onCountryClick?: (code: string, name: string, existing: VisitedCountry | null) => void;
   onMapClick?: (lat: number, lng: number) => void;
   onCityClick?: (city: CityMarker) => void;
@@ -91,6 +102,16 @@ function resolveCode(feature: { properties?: Record<string, unknown> } | null | 
   return nameEn ? (COUNTRY_NAME_EN_MAP.get(nameEn.toLowerCase()) ?? "") : "";
 }
 
+/** Baut HTML-String für Fotogruppen-Links in einem Popup */
+function buildFotogruppenPopupHtml(links: FotogruppenLink[]): string {
+  if (links.length === 0) return "";
+  const items = links.map(
+    (l) =>
+      `<a href="/fotodatenbank/datenbank?fotogruppe=${l.fotogruppeId}" target="_blank" rel="noopener noreferrer" style="display:block;color:#f59e0b;text-decoration:none;padding:2px 0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:220px;" title="${l.fotogruppeNname}">📷 ${l.fotogruppeNname}</a>`
+  ).join("");
+  return `<div style="font-size:12px;line-height:1.6;">${items}</div>`;
+}
+
 export default function WorldMap({
   visitedCountries,
   cities,
@@ -100,6 +121,7 @@ export default function WorldMap({
   readOnly = false,
   height = "500px",
   mode = "laender",
+  fotogruppenLinks = [],
   onCountryClick,
   onMapClick,
   onCityClick,
@@ -111,16 +133,18 @@ export default function WorldMap({
   const [mapReady, setMapReady] = useState(false);
 
   // ── Latest-Ref-Pattern ───────────────────────────────────────────────────
-  const onCountryClickRef   = useRef(onCountryClick);
-  const onMapClickRef       = useRef(onMapClick);
-  const onCityClickRef      = useRef(onCityClick);
-  const onSightClickRef     = useRef(onSightClick);
-  const visitedCountriesRef = useRef(visitedCountries);
+  const onCountryClickRef    = useRef(onCountryClick);
+  const onMapClickRef        = useRef(onMapClick);
+  const onCityClickRef       = useRef(onCityClick);
+  const onSightClickRef      = useRef(onSightClick);
+  const visitedCountriesRef  = useRef(visitedCountries);
+  const fotogruppenLinksRef  = useRef(fotogruppenLinks);
   onCountryClickRef.current   = onCountryClick;
   onMapClickRef.current       = onMapClick;
   onCityClickRef.current      = onCityClick;
   onSightClickRef.current     = onSightClick;
   visitedCountriesRef.current = visitedCountries;
+  fotogruppenLinksRef.current = fotogruppenLinks;
 
   const isStaedte = mode === "staedte";
 
@@ -227,6 +251,10 @@ export default function WorldMap({
               if (!staedte) {
                 lyr.bindTooltip(nameDE, { sticky: true, className: "travel-tooltip" });
 
+                // Fotogruppen-Popup für bereiste Länder (über visited entity_id)
+                // Wird später im useEffect aktualisiert wenn fotogruppenLinks sich ändern
+                // → hier nur ein Platzhalter-Popup binden; echte Links via updateCountryPopups
+
                 if (!readOnly && code) {
                   (lyr as L.Path).on("mouseover", (e) => {
                     const path = e.target as L.Path;
@@ -246,6 +274,24 @@ export default function WorldMap({
                     if (cb) {
                       setTimeout(() => cb(code, nameDE, existing), 0);
                     }
+                  });
+                }
+
+                // Beim Klick im readOnly-Modus: Fotogruppen-Popup anzeigen
+                if (readOnly && code) {
+                  (lyr as L.Path).on("click", (e: L.LeafletMouseEvent) => {
+                    L.DomEvent.stopPropagation(e);
+                    const visited = buildVisitedMap().get(code);
+                    if (!visited) return;
+                    const links = fotogruppenLinksRef.current.filter(
+                      (fl) => fl.entityType === "country" && fl.entityId === visited.id
+                    );
+                    if (links.length === 0) return;
+                    const popupHtml = `<div style="min-width:160px"><strong style="color:#fff;font-size:13px">📷 Fotogruppen</strong>${buildFotogruppenPopupHtml(links)}</div>`;
+                    L.popup({ className: "travel-fotogruppen-popup", closeButton: true, maxWidth: 280 })
+                      .setLatLng(e.latlng)
+                      .setContent(popupHtml)
+                      .openOn(map);
                   });
                 }
               }
@@ -304,11 +350,18 @@ export default function WorldMap({
       }
       const cityLayer = m._cityLayer!;
 
-      cities.forEach((city) => {
+        cities.forEach((city) => {
         if (!city.lat || !city.lng) return;
         const lat = parseFloat(city.lat), lng = parseFloat(city.lng);
         if (isNaN(lat) || isNaN(lng)) return;
         const color = city.visitedBy === "both" ? COLOR_BOTH : city.visitedBy === "user2" ? COLOR_USER2 : COLOR_USER1;
+
+        const cityLinks = fotogruppenLinksRef.current.filter(
+          (fl) => fl.entityType === "city" && fl.entityId === city.id
+        );
+        const tooltipLabel = cityLinks.length > 0
+          ? `🏙️ ${city.name} 📷${cityLinks.length}`
+          : `🏙️ ${city.name}`;
 
         const marker = L.circleMarker([lat, lng], {
           radius: isStaedte ? 9 : 6,
@@ -318,7 +371,7 @@ export default function WorldMap({
           fillOpacity: 0.9,
           interactive: true,
           bubblingMouseEvents: false,
-        }).bindTooltip(`🏙️ ${city.name}`, {
+        }).bindTooltip(tooltipLabel, {
           className: "travel-tooltip",
           permanent: false,
           direction: "top",
@@ -339,6 +392,16 @@ export default function WorldMap({
               L.DomEvent.stopPropagation(e);
               setTimeout(() => onCityClickRef.current?.(city), 0);
             });
+          } else if (readOnly && cityLinks.length > 0) {
+            // Im readOnly-Modus: Fotogruppen-Popup bei Klick
+            marker.on("click", (e: L.LeafletMouseEvent) => {
+              L.DomEvent.stopPropagation(e);
+              const popupHtml = `<div style="min-width:160px"><strong style="color:#fff;font-size:13px">🏙️ ${city.name}</strong><div style="margin:4px 0 2px;border-top:1px solid #374151;padding-top:4px">${buildFotogruppenPopupHtml(cityLinks)}</div></div>`;
+              L.popup({ className: "travel-fotogruppen-popup", closeButton: true, maxWidth: 280 })
+                .setLatLng(e.latlng)
+                .setContent(popupHtml)
+                .openOn(map);
+            });
           }
         }
 
@@ -351,6 +414,13 @@ export default function WorldMap({
         if (isNaN(lat) || isNaN(lng)) return;
         const color = sight.visitedBy === "both" ? COLOR_BOTH : sight.visitedBy === "user2" ? COLOR_USER2 : COLOR_USER1;
 
+        const sightLinks = fotogruppenLinksRef.current.filter(
+          (fl) => fl.entityType === "sight" && fl.entityId === sight.id
+        );
+        const sightTooltipLabel = sightLinks.length > 0
+          ? `⭐ ${sight.name} 📷${sightLinks.length}`
+          : `⭐ ${sight.name}`;
+
         const marker = L.circleMarker([lat, lng], {
           radius: isStaedte ? 7 : 5,
           fillColor: color,
@@ -359,7 +429,7 @@ export default function WorldMap({
           fillOpacity: 0.9,
           interactive: true,
           bubblingMouseEvents: false,
-        }).bindTooltip(`⭐ ${sight.name}`, {
+        }).bindTooltip(sightTooltipLabel, {
           className: "travel-tooltip",
           permanent: false,
           direction: "top",
@@ -379,6 +449,16 @@ export default function WorldMap({
             marker.on("click", (e: L.LeafletMouseEvent) => {
               L.DomEvent.stopPropagation(e);
               setTimeout(() => onSightClickRef.current?.(sight), 0);
+            });
+          } else if (readOnly && sightLinks.length > 0) {
+            // Im readOnly-Modus: Fotogruppen-Popup bei Klick
+            marker.on("click", (e: L.LeafletMouseEvent) => {
+              L.DomEvent.stopPropagation(e);
+              const popupHtml = `<div style="min-width:160px"><strong style="color:#fff;font-size:13px">⭐ ${sight.name}</strong><div style="margin:4px 0 2px;border-top:1px solid #374151;padding-top:4px">${buildFotogruppenPopupHtml(sightLinks)}</div></div>`;
+              L.popup({ className: "travel-fotogruppen-popup", closeButton: true, maxWidth: 280 })
+                .setLatLng(e.latlng)
+                .setContent(popupHtml)
+                .openOn(map);
             });
           }
         }
@@ -448,6 +528,28 @@ export default function WorldMap({
         }
         .travel-tooltip::before { display: none; }
         .leaflet-container { font-family: inherit; }
+        .travel-fotogruppen-popup .leaflet-popup-content-wrapper {
+          background: #1f2937;
+          border: 1px solid #374151;
+          border-radius: 10px;
+          box-shadow: 0 4px 16px rgba(0,0,0,0.6);
+          color: #f9fafb;
+          padding: 10px 14px;
+        }
+        .travel-fotogruppen-popup .leaflet-popup-tip {
+          background: #1f2937;
+        }
+        .travel-fotogruppen-popup .leaflet-popup-close-button {
+          color: #9ca3af !important;
+          font-size: 16px !important;
+          padding: 4px 8px !important;
+        }
+        .travel-fotogruppen-popup .leaflet-popup-close-button:hover {
+          color: #fff !important;
+        }
+        .travel-fotogruppen-popup .leaflet-popup-content {
+          margin: 0;
+        }
       `}</style>
     </div>
   );

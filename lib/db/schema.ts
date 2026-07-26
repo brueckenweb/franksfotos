@@ -643,6 +643,30 @@ export const travelSights = mysqlTable("travel_sights", {
 }));
 
 // ============================================================
+// REISE ↔ FOTOGRUPPEN-VERKNÜPFUNGEN
+// ============================================================
+
+/**
+ * Verknüpfung: Reisekarten-Einträge (Länder, Städte, Sehenswürdigkeiten) ↔ Fotogruppen
+ * entity_type: 'country' | 'city' | 'sight'
+ * entity_id:   ID aus travel_countries / travel_cities / travel_sights
+ */
+export const travelFotogruppenLinks = mysqlTable("travel_fotogruppen_links", {
+  id:             int("id").primaryKey().autoincrement(),
+  entityType:     varchar("entity_type", { length: 10 }).notNull(),   // 'country' | 'city' | 'sight'
+  entityId:       int("entity_id").notNull(),
+  mapId:          int("map_id").notNull(),                             // travel_maps.id
+  fotogruppeId:   bigint("fotogruppe_id", { mode: "number" }).notNull(), // fd_fotogruppen.idfgruppe (soft-ref)
+  fotogruppeNname: varchar("fotogruppe_name", { length: 255 }).notNull().default(""),
+  createdAt:      timestamp("created_at").defaultNow().notNull(),
+}, (table) => ({
+  entityIdx:     index("tfl_entity_idx").on(table.entityType, table.entityId),
+  mapIdx:        index("tfl_map_idx").on(table.mapId),
+  fotogruppeIdx: index("tfl_fotogruppe_idx").on(table.fotogruppeId),
+  uniqueLink:    uniqueIndex("tfl_unique").on(table.entityType, table.entityId, table.fotogruppeId),
+}));
+
+// ============================================================
 // E-MAIL-VERIFIKATIONS-TOKENS
 // ============================================================
 
@@ -825,3 +849,5 @@ export type TravelCity    = typeof travelCities.$inferSelect;
 export type NewTravelCity = typeof travelCities.$inferInsert;
 export type TravelSight    = typeof travelSights.$inferSelect;
 export type NewTravelSight = typeof travelSights.$inferInsert;
+export type TravelFotogruppenLink    = typeof travelFotogruppenLinks.$inferSelect;
+export type NewTravelFotogruppenLink = typeof travelFotogruppenLinks.$inferInsert;
