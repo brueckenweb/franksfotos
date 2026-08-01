@@ -29,7 +29,7 @@ const GpxPreviewMap = dynamic(
   }
 );
 
-const TYPEN = ["Wanderung", "Autofahrt", "Fahrrad", "Schifffahrt", "Flugzeug"] as const;
+const TYPEN = ["Wanderung", "Autofahrt", "Fahrrad", "Schifffahrt", "Flugzeug", "Eisenbahn"] as const;
 
 interface Album { id: number; name: string; slug: string; parentId: number | null }
 interface Fotogruppe { idfgruppe: number; name: string }

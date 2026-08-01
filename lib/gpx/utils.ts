@@ -164,6 +164,7 @@ export const TYP_EMOJI: Record<string, string> = {
   Fahrrad:    "🚴",
   Schifffahrt:"⛵",
   Flugzeug:   "✈️",
+  Eisenbahn:  "🚂",
 };
 
 export const TYP_FARBE: Record<string, string> = {
@@ -172,4 +173,5 @@ export const TYP_FARBE: Record<string, string> = {
   Fahrrad:    "#f59e0b",   // gelb
   Schifffahrt:"#06b6d4",   // cyan
   Flugzeug:   "#a855f7",   // lila
+  Eisenbahn:  "#ef4444",   // rot
 };

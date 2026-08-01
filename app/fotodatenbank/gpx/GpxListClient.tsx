@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Pencil, Map as MapIcon, Trash2, ArrowUpDown, ChevronUp, ChevronDown, Check, FolderOpen } from "lucide-react";
@@ -34,6 +34,16 @@ interface Props {
   fotogruppen: Fotogruppe[];
 }
 
+type SortKey = "typ" | "titel" | "land" | "laengeKm" | "hoehmAuf" | "datumTour" | "fotogruppenName" | "albumName" | "eingetragen";
+type SortDir = "asc" | "desc";
+
+function SortIcon({ col, sortKey, sortDir }: { col: SortKey; sortKey: SortKey; sortDir: SortDir }) {
+  if (col !== sortKey) return <ArrowUpDown className="w-3 h-3 ml-1 opacity-30 inline-block" />;
+  return sortDir === "asc"
+    ? <ChevronUp   className="w-3 h-3 ml-1 text-blue-400 inline-block" />
+    : <ChevronDown className="w-3 h-3 ml-1 text-blue-400 inline-block" />;
+}
+
 export default function GpxListClient({ tracks: initial, alben, fotogruppen }: Props) {
   const router = useRouter();
   const [tracks, setTracks] = useState<Track[]>(initial);
@@ -44,6 +54,74 @@ export default function GpxListClient({ tracks: initial, alben, fotogruppen }: P
   const [savingSort, setSavingSort] = useState(false);
   const [sortSaved, setSortSaved] = useState(false);
 
+  // ── Spalten-Sortierung ───────────────────────────────────────────────
+  const [sortKey, setSortKey] = useState<SortKey>("eingetragen");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+
+  const handleSort = (key: SortKey) => {
+    if (sortKey === key) {
+      setSortDir(d => d === "asc" ? "desc" : "asc");
+    } else {
+      setSortKey(key);
+      setSortDir("asc");
+    }
+  };
+
+  const sortedTracks = useMemo(() => {
+    return [...tracks].sort((a, b) => {
+      let valA: string | number | null = null;
+      let valB: string | number | null = null;
+
+      switch (sortKey) {
+        case "typ":
+          valA = a.typ ?? "";
+          valB = b.typ ?? "";
+          break;
+        case "titel":
+          valA = a.titel ?? "";
+          valB = b.titel ?? "";
+          break;
+        case "land":
+          valA = a.land ?? "";
+          valB = b.land ?? "";
+          break;
+        case "laengeKm":
+          valA = a.laengeKm ? parseFloat(a.laengeKm) : -1;
+          valB = b.laengeKm ? parseFloat(b.laengeKm) : -1;
+          break;
+        case "hoehmAuf":
+          valA = a.hoehmAuf ?? -1;
+          valB = b.hoehmAuf ?? -1;
+          break;
+        case "datumTour":
+          valA = a.datumTour ? new Date(a.datumTour).getTime() : -1;
+          valB = b.datumTour ? new Date(b.datumTour).getTime() : -1;
+          break;
+        case "fotogruppenName":
+          valA = a.fotogruppenName ?? "";
+          valB = b.fotogruppenName ?? "";
+          break;
+        case "albumName":
+          valA = a.albumName ?? "";
+          valB = b.albumName ?? "";
+          break;
+        case "eingetragen":
+          valA = new Date(a.eingetragen).getTime();
+          valB = new Date(b.eingetragen).getTime();
+          break;
+      }
+
+      if (typeof valA === "string" && typeof valB === "string") {
+        const cmp = valA.localeCompare(valB, "de", { sensitivity: "base" });
+        return sortDir === "asc" ? cmp : -cmp;
+      }
+      const numA = valA as number;
+      const numB = valB as number;
+      return sortDir === "asc" ? numA - numB : numB - numA;
+    });
+  }, [tracks, sortKey, sortDir]);
+
+  // ── Hilfsfunktionen ──────────────────────────────────────────────────
   const formatDatum = (d: Date | string | null) => {
     if (!d) return "–";
     return new Date(d).toLocaleDateString("de-DE");
@@ -66,7 +144,6 @@ export default function GpxListClient({ tracks: initial, alben, fotogruppen }: P
   // Sortier-Modus aktivieren: nur Tracks mit Album gruppieren
   const startSortieren = () => {
     const mitAlbum = tracks.filter(t => t.albumId !== null);
-    // Innerhalb jedes Albums nach sortOrder sortieren
     const sorted = [...mitAlbum].sort((a, b) =>
       (a.albumId ?? 0) - (b.albumId ?? 0) ||
       a.sortOrder - b.sortOrder ||
@@ -85,7 +162,6 @@ export default function GpxListClient({ tracks: initial, alben, fotogruppen }: P
       const track = prev[idx];
       const albumId = track.albumId;
 
-      // Nachbarn im selben Album suchen
       const albumTracks = prev.filter(t => t.albumId === albumId);
       const albumIdx = albumTracks.findIndex(t => t.id === id);
 
@@ -96,7 +172,6 @@ export default function GpxListClient({ tracks: initial, alben, fotogruppen }: P
       const swapIdx = prev.findIndex(t => t.id === swapWith.id);
 
       const newArr = [...prev];
-      // Tauschen
       [newArr[idx], newArr[swapIdx]] = [newArr[swapIdx], newArr[idx]];
       return newArr;
     });
@@ -107,7 +182,6 @@ export default function GpxListClient({ tracks: initial, alben, fotogruppen }: P
   const saveSortOrder = async () => {
     setSavingSort(true);
     try {
-      // sortOrder-Nummern pro Album neu vergeben (0, 1, 2, ...)
       const albumGroups = new Map<number, Track[]>();
       for (const t of sortierTracks) {
         if (t.albumId !== null) {
@@ -128,7 +202,6 @@ export default function GpxListClient({ tracks: initial, alben, fotogruppen }: P
       });
 
       if (res.ok) {
-        // Lokalen State aktualisieren
         setTracks(prev =>
           prev.map(t => {
             const upd = updates.find(u => u.id === t.id);
@@ -143,7 +216,7 @@ export default function GpxListClient({ tracks: initial, alben, fotogruppen }: P
     }
   };
 
-  // Album-Gruppen für den Sortier-Modus ermitteln
+  // Album-Gruppen für den Sortier-Modus
   const albumGruppen = (() => {
     const map = new Map<number, { albumName: string; albumSlug: string | null; tracks: Track[] }>();
     for (const t of sortierTracks) {
@@ -167,6 +240,23 @@ export default function GpxListClient({ tracks: initial, alben, fotogruppen }: P
       </div>
     );
   }
+
+  // Spalten-Header mit Klick-Sortierung
+  const Th = ({
+    col, label, className = "", align = "left",
+  }: {
+    col: SortKey; label: string; className?: string; align?: "left" | "right";
+  }) => (
+    <th
+      className={`px-4 py-3 cursor-pointer select-none hover:text-white transition-colors ${align === "right" ? "text-right" : "text-left"} ${className}`}
+      onClick={() => handleSort(col)}
+    >
+      <span className="inline-flex items-center gap-0.5">
+        {label}
+        <SortIcon col={col} sortKey={sortKey} sortDir={sortDir} />
+      </span>
+    </th>
+  );
 
   return (
     <>
@@ -213,7 +303,6 @@ export default function GpxListClient({ tracks: initial, alben, fotogruppen }: P
           )}
           {albumGruppen.map(gruppe => (
             <div key={gruppe.albumId} className="bg-gray-900 border border-gray-700 rounded-xl overflow-hidden">
-              {/* Album-Header */}
               <div className="bg-gray-800 px-4 py-3 flex items-center gap-2">
                 <FolderOpen className="w-4 h-4 text-amber-400" />
                 <span className="text-white font-medium text-sm">{gruppe.albumName}</span>
@@ -229,23 +318,13 @@ export default function GpxListClient({ tracks: initial, alben, fotogruppen }: P
                 <span className="text-xs text-gray-500 ml-auto">{gruppe.tracks.length} Track{gruppe.tracks.length !== 1 ? "s" : ""}</span>
               </div>
 
-              {/* Track-Liste */}
               <div className="divide-y divide-gray-800">
                 {gruppe.tracks.map((t, i) => (
                   <div key={t.id} className="flex items-center gap-3 px-4 py-3">
-                    {/* Position */}
                     <span className="text-gray-600 text-xs w-5 text-center font-mono">{i + 1}</span>
-
-                    {/* Typ-Emoji */}
                     <span className="text-base">{TYP_EMOJI[t.typ] ?? "🗺️"}</span>
-
-                    {/* Titel */}
                     <span className="text-white text-sm font-medium flex-1 truncate">{t.titel}</span>
-
-                    {/* Datum */}
                     <span className="text-gray-500 text-xs hidden sm:block">{formatDatum(t.datumTour)}</span>
-
-                    {/* Auf/Ab Buttons */}
                     <div className="flex items-center gap-1">
                       <button
                         onClick={() => moveTrack(t.id, "up")}
@@ -278,20 +357,20 @@ export default function GpxListClient({ tracks: initial, alben, fotogruppen }: P
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-gray-700 bg-gray-800/50 text-gray-400 text-xs uppercase tracking-wide">
-                <th className="text-left px-4 py-3">Typ</th>
-                <th className="text-left px-4 py-3">Titel</th>
-                <th className="text-left px-4 py-3 hidden md:table-cell">Land</th>
-                <th className="text-right px-4 py-3 hidden sm:table-cell">km</th>
-                <th className="text-right px-4 py-3 hidden sm:table-cell">↑ m</th>
-                <th className="text-left px-4 py-3 hidden lg:table-cell">Datum</th>
-                <th className="text-left px-4 py-3 hidden lg:table-cell">Fotogruppe</th>
-                <th className="text-left px-4 py-3 hidden xl:table-cell">Album</th>
-                <th className="text-left px-4 py-3 hidden xl:table-cell">Eingetragen</th>
+                <Th col="typ"            label="Typ"         />
+                <Th col="titel"          label="Titel"       />
+                <Th col="land"           label="Land"        className="hidden md:table-cell" />
+                <Th col="laengeKm"       label="km"          className="hidden sm:table-cell" align="right" />
+                <Th col="hoehmAuf"       label="↑ m"         className="hidden sm:table-cell" align="right" />
+                <Th col="datumTour"      label="Datum"       className="hidden lg:table-cell" />
+                <Th col="fotogruppenName" label="Fotogruppe" className="hidden lg:table-cell" />
+                <Th col="albumName"      label="Album"       className="hidden xl:table-cell" />
+                <Th col="eingetragen"    label="Eingetragen" className="hidden xl:table-cell" />
                 <th className="px-4 py-3 text-right">Aktionen</th>
               </tr>
             </thead>
             <tbody>
-              {tracks.map((t, i) => (
+              {sortedTracks.map((t, i) => (
                 <tr key={t.id} className={`border-b border-gray-800 hover:bg-gray-800/30 transition-colors ${i % 2 === 0 ? "" : "bg-gray-900/30"}`}>
                   <td className="px-4 py-3 text-lg">{TYP_EMOJI[t.typ] ?? "🗺️"}</td>
                   <td className="px-4 py-3">
@@ -308,7 +387,6 @@ export default function GpxListClient({ tracks: initial, alben, fotogruppen }: P
                     {t.hoehmAuf ?? "–"}
                   </td>
                   <td className="px-4 py-3 text-gray-400 hidden lg:table-cell">{formatDatum(t.datumTour)}</td>
-                  {/* Fotogruppe */}
                   <td className="px-4 py-3 hidden lg:table-cell">
                     {t.fotogruppenName ? (
                       <span className="inline-block bg-amber-900/30 text-amber-400 text-xs px-2 py-0.5 rounded border border-amber-800/50 truncate max-w-[140px]" title={t.fotogruppenName}>
@@ -318,7 +396,6 @@ export default function GpxListClient({ tracks: initial, alben, fotogruppen }: P
                       <span className="text-gray-600 text-xs">–</span>
                     )}
                   </td>
-                  {/* Album */}
                   <td className="px-4 py-3 hidden xl:table-cell">
                     {t.albumSlug ? (
                       <Link href={`/alben/${t.albumSlug}`} className="text-blue-400 hover:text-blue-300 text-xs transition-colors">

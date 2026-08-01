@@ -9,7 +9,7 @@ import { X, Save } from "lucide-react";
 import { TYP_EMOJI } from "@/lib/gpx/utils";
 import AlbumTreeSelect from "@/app/admin/alben/AlbumTreeSelect";
 
-const TYPEN = ["Wanderung", "Autofahrt", "Fahrrad", "Schifffahrt", "Flugzeug"] as const;
+const TYPEN = ["Wanderung", "Autofahrt", "Fahrrad", "Schifffahrt", "Flugzeug", "Eisenbahn"] as const;
 
 interface Album { id: number; name: string; parentId: number | null }
 interface Fotogruppe { idfgruppe: number; name: string }
