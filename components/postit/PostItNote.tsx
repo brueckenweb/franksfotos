@@ -11,6 +11,14 @@ interface PostItNoteProps {
   sichtbarkeit?: Sichtbarkeit;
 }
 
+/**
+ * Wandelt hardcodierte localhost-URLs in relative Pfade um.
+ * Schützt vor Links wie http://localhost:3000/reisen/... die in prod nicht funktionieren.
+ */
+function fixLocalhostLinks(html: string): string {
+  return html.replace(/https?:\/\/localhost(:\d+)?\//g, "/");
+}
+
 export default function PostItNote({ message, color, sichtbarkeit = "alle" }: PostItNoteProps) {
   const safeColor = ["yellow", "pink", "blue", "green", "orange"].includes(color)
     ? color
@@ -39,10 +47,10 @@ export default function PostItNote({ message, color, sichtbarkeit = "alle" }: Po
         </div>
       )}
 
-      {/* Nachricht – rendert TipTap-HTML */}
+      {/* Nachricht – rendert TipTap-HTML (localhost-Links werden automatisch korrigiert) */}
       <div
         className="postit-message"
-        dangerouslySetInnerHTML={{ __html: message }}
+        dangerouslySetInnerHTML={{ __html: fixLocalhostLinks(message) }}
       />
     </div>
   );

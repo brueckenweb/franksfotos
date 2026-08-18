@@ -126,8 +126,10 @@ export default function PostItTipTapEditor({ content, onChange }: Props) {
   }
 
   function saveLink() {
-    if (linkUrl.trim()) {
-      editor!.chain().focus().setLink({ href: linkUrl.trim() }).run();
+    // Localhost-URLs automatisch in relative Pfade umwandeln (z.B. http://localhost:3000/reisen → /reisen)
+    let url = linkUrl.trim().replace(/^https?:\/\/localhost(:\d+)?\//, "/");
+    if (url) {
+      editor!.chain().focus().setLink({ href: url }).run();
     } else {
       editor!.chain().focus().unsetLink().run();
     }
