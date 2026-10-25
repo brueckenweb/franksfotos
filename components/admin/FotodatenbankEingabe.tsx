@@ -289,9 +289,9 @@ export default function FotodatenbankEingabe() {
         bdatum:         localData.exif.bdatum || prev.bdatum,
         bnegativnr:     localData.bildTyp === "video" ? "Video" : "digital",
         pfad:           calcNewpath(serverData.bnummer),
-        gpsbreite:      localData.exif.gpsBreite,
-        gpslaenge:      localData.exif.gpsLaenge,
-        gpshoehe:       localData.exif.gpsHoehe,
+        gpsbreite:      Number(localData.exif.gpsBreite) || 0,
+        gpslaenge:      Number(localData.exif.gpsLaenge) || 0,
+        gpshoehe:       Number(localData.exif.gpsHoehe)  || 0,
         land:     serverData.geoLand || serverData.letzterEintrag?.land  || prev.land,
         ort:      ortFesthaltenRef.current
                     ? prev.ort
@@ -530,7 +530,9 @@ export default function FotodatenbankEingabe() {
   // ── Hilfsberechnungen für die Vorschau ────────────────────────────────────
   const isVideo  = scanData?.bildTyp === "video";
   const mp4File  = scanData?.fileMap["mp4"] ?? scanData?.fileMap["mov"] ?? null;
-  const hasGps   = form.gpsbreite !== 0 || form.gpslaenge !== 0;
+  const gpsBreiteSafe = Number.isFinite(Number(form.gpsbreite)) && form.gpsbreite != null ? Number(form.gpsbreite) : 0;
+  const gpsLaengeSafe = Number.isFinite(Number(form.gpslaenge)) && form.gpslaenge != null ? Number(form.gpslaenge) : 0;
+  const hasGps   = gpsBreiteSafe !== 0 || gpsLaengeSafe !== 0;
 
   // ─────────────────────────────────────────────────────────────────────────
   // UI: Lokalen Server prüfen
@@ -1215,7 +1217,7 @@ export default function FotodatenbankEingabe() {
               )}
               {hasGps ? (
                 <span className="text-green-400">
-                  {form.gpsbreite.toFixed(5)}, {form.gpslaenge.toFixed(5)}
+                  {gpsBreiteSafe.toFixed(5)}, {gpsLaengeSafe.toFixed(5)}
                 </span>
               ) : (
                 <span className="text-gray-500">Keine GPS-Daten</span>
@@ -1223,8 +1225,8 @@ export default function FotodatenbankEingabe() {
             </div>
           </div>
           <FotodatenbankMap
-            lat={form.gpsbreite}
-            lng={form.gpslaenge}
+            lat={gpsBreiteSafe}
+            lng={gpsLaengeSafe}
             richtung={scanData?.exif.gpsRichtung ?? -1}
             onPositionChange={(lat, lng) => {
               setField("gpsbreite", lat);

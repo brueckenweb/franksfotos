@@ -176,23 +176,24 @@ export default function WorldMap({
       });
 
       if (staedte) {
-        // CARTO Positron: helle, klare Karte – Städtenamen gut lesbar, Marker fallen auf
+        // OpenStreetMap: helle Karte – Städtenamen gut lesbar, Marker fallen auf
         L.tileLayer(
-          "https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png",
+          "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
           {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
-            subdomains: "abcd",
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende',
+            subdomains: "abc",
             maxZoom: 19,
           }
         ).addTo(map);
       } else {
-        // CARTO Voyager: für Länderfärbung
+        // OpenStreetMap: für Länderfärbung (Hintergrund hält sich dezent zurück)
         L.tileLayer(
-          "https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png",
+          "https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png",
           {
-            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
-            subdomains: "abcd",
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>-Mitwirkende',
+            subdomains: "abc",
             maxZoom: 19,
+            opacity: 0.35,
           }
         ).addTo(map);
       }
